@@ -1,0 +1,145 @@
+"""
+SQLAlchemy database models for AutoSplit.
+
+Think of these as the "blueprints" for our database tables.
+Each class = one table, each Column = one column in that table.
+The relationships let SQLAlchemy automatically join tables for us.
+"""
+
+from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, Text, ForeignKey, JSON, UniqueConstraint
+from sqlalchemy.orm import declarative_base, relationship
+from datetime import datetime, timezone
+
+# Base is the "parent" all models inherit from — SQLAlchemy needs this
+Base = declarative_base()
+
+
+class Group(Base):
+    """
+    A household or group of people sharing expenses.
+    Example: "The 3rd St Apartment"
+    """
+    __tablename__ = "groups"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    # One group → many members/statements/rules
+    members = relationship("Member", back_populates="group", cascade="all, delete-orphan")
+    statements = relationship("Statement", back_populates="group", cascade="all, delete-orphan")
+    merchant_rules = relationship("MerchantRule", back_populates="group", cascade="all, delete-orphan")
+
+
+class Member(Base):
+    """
+    One person in the group.
+    Example: "Alice", "Bob", "Charlie"
+    """
+    __tablename__ = "members"
+
+    id = Column(Integer, primary_key=True, index=True)
+    group_id = Column(Integer, ForeignKey("groups.id"), nullable=False)
+    name = Column(String, nullable=False)
+
+    group = relationship("Group", back_populates="members")
+
+
+class Statement(Base):
+    """
+    One uploaded credit card statement (PDF).
+    We store the statement period (e.g. Jan 9 – Feb 8) so we can
+    correctly assign years to transaction dates like "01/15".
+    source_hash prevents the same PDF from being imported twice.
+    """
+    __tablename__ = "statements"
+
+    id = Column(Integer, primary_key=True, index=True)
+    group_id = Column(Integer, ForeignKey("groups.id"), nullable=False)
+    # Statement date = the closing/due date printed on the statement
+    statement_date = Column(String, nullable=True)
+    period_start = Column(String, nullable=True)   # e.g. "2026-01-09"
+    period_end = Column(String, nullable=True)     # e.g. "2026-02-08"
+    # SHA-256 hash of the uploaded file bytes — used to detect duplicate uploads
+    source_hash = Column(String, unique=True, nullable=False)
+    # Full extracted text stored for debugging
+    raw_text = Column(Text, nullable=True)
+    uploaded_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    # Which member is the card holder (paid the bill)
+    card_holder_member_id = Column(Integer, ForeignKey("members.id"), nullable=True)
+
+    group = relationship("Group", back_populates="statements")
+    transactions = relationship("Transaction", back_populates="statement", cascade="all, delete-orphan")
+    card_holder = relationship("Member", foreign_keys=[card_holder_member_id])
+
+
+class Transaction(Base):
+    """
+    One line item from the credit card statement.
+
+    Stores both the raw data from the PDF AND the user's decisions about
+    how to split it. The overrides_json field tracks any manual changes
+    the user made (for audit trail).
+
+    parse_confidence: 1.0 = perfectly parsed, <0.8 = might be wrong, flag for review.
+    txn_hash: fingerprint of date+merchant+amount for idempotency (no duplicate imports).
+    """
+    __tablename__ = "transactions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    statement_id = Column(Integer, ForeignKey("statements.id"), nullable=False)
+    posted_date = Column(String, nullable=False)        # "2026-01-15" (ISO format)
+    description_raw = Column(String, nullable=False)    # Exactly as it appears on statement
+    amount = Column(Float, nullable=False)
+    txn_type = Column(String, default="purchase")       # "purchase" (future: "payment", "credit")
+    category = Column(String, nullable=True)            # "dining", "groceries", etc.
+    is_personal = Column(Boolean, default=False)        # If True, excluded from splitting
+
+    # Who splits this charge and how.
+    # participants_json example: {"type": "all", "member_ids": [1, 2, 3]}
+    # type can be: "all", "single", "custom", "ask" (needs user input)
+    participants_json = Column(JSON, nullable=True)
+
+    # How to split the amount.
+    # split_method_json examples:
+    #   {"type": "equal"}
+    #   {"type": "percentage", "percentages": {"1": 60, "2": 40}}
+    #   {"type": "exact", "amounts": {"1": 45.00, "2": 23.50}}
+    split_method_json = Column(JSON, nullable=True)
+
+    # Any manual overrides the user made (for audit + merchant rule learning)
+    overrides_json = Column(JSON, nullable=True, default=dict)
+
+    parse_confidence = Column(Float, default=1.0)
+    txn_hash = Column(String, nullable=False, index=True)  # fingerprint for dedup
+
+    statement = relationship("Statement", back_populates="transactions")
+
+
+class MerchantRule(Base):
+    """
+    "Remember this" rules for specific merchants.
+
+    When a user overrides a transaction and clicks "Save as merchant rule",
+    we store their preference here. Next time that merchant appears,
+    we auto-apply the same category, participants, and split method.
+
+    merchant_key is a normalized version of the merchant name
+    (lowercase, stripped of location/numbers) for fuzzy matching.
+    Example: "WHOLE FOODS MARKET 123 NEW YORK NY" → "whole foods market"
+    """
+    __tablename__ = "merchant_rules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    group_id = Column(Integer, ForeignKey("groups.id"), nullable=False)
+    merchant_key = Column(String, nullable=False)           # normalized merchant name
+    default_category = Column(String, nullable=True)
+    default_participants_json = Column(JSON, nullable=True)
+    default_split_method_json = Column(JSON, nullable=True)
+
+    group = relationship("Group", back_populates="merchant_rules")
+
+    # Unique constraint: one rule per merchant per group
+    __table_args__ = (
+        UniqueConstraint('group_id', 'merchant_key', name='uq_merchant_rule'),
+    )
