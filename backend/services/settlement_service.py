@@ -9,9 +9,24 @@ from the database and formats the results for the API response.
 from sqlalchemy.orm import Session
 from typing import Optional
 
-from models.models import Transaction, Member, Statement
+from models.models import Transaction, Member, Statement, Group
 from domain.settlement import compute_net_balances, minimize_transfers
 from schemas.schemas import BalanceItem, TransferItem, SettlementResponse
+
+# Currency symbols for human-readable payment request messages.
+# Mirrors the CURRENCY_SYMBOLS map in the frontend.
+_CURRENCY_SYMBOLS = {
+    'USD': '$', 'AUD': 'A$', 'NZD': 'NZ$', 'JPY': '¥',
+    'GBP': '£', 'EUR': '€', 'CAD': 'C$', 'SGD': 'S$', 'HKD': 'HK$', 'THB': '฿',
+}
+
+def _fmt(amount: float, currency: str = 'USD') -> str:
+    """Format an amount with the correct currency symbol and decimal places."""
+    sym = _CURRENCY_SYMBOLS.get(currency, currency + ' ')
+    # JPY has no decimal places (¥5,000 not ¥5,000.00)
+    if currency == 'JPY':
+        return f"{sym}{int(round(amount)):,}"
+    return f"{sym}{amount:,.2f}"
 
 
 def compute_settlement(
@@ -65,16 +80,40 @@ def compute_settlement(
                 .all()
             )
 
-    # Filter out personal transactions and those with no participants
+    # Filter out personal, excluded, and unassigned transactions.
+    # The new `status` field gives us a three-way switch:
+    #   "unreviewed" = still being reviewed, but included in settlement
+    #   "confirmed"  = user approved, included
+    #   "excluded"   = user said "not shared" — skip entirely
     shared_transactions = [
         t for t in transactions
-        if not t.is_personal
+        if t.status != "excluded"
+        and not t.is_personal
         and t.participants_json
         and t.participants_json.get("member_ids")
     ]
 
+    # ── Fetch group's settlement currency ────────────────────────────────────
+    group = db.query(Group).filter_by(id=group_id).first()
+    base_currency = group.base_currency if group else "USD"
+
+    # ── Build per-statement payer map ────────────────────────────────────────
+    # For multi-card trips, each statement has its own card holder.
+    # Alice's card charges credit Alice; Bob's card charges credit Bob.
+    # This dict maps statement_id → member_id for whoever held that card.
+    statement_payers = {
+        s.id: s.card_holder_member_id
+        for s in db.query(Statement).filter_by(group_id=group_id).all()
+        if s.card_holder_member_id  # Only include statements with a card holder set
+    }
+
     # ── Compute net balances ─────────────────────────────────────────────────
-    balances = compute_net_balances(shared_transactions, payer_member_id, all_member_ids)
+    balances = compute_net_balances(
+        shared_transactions,
+        payer_member_id,
+        all_member_ids,
+        statement_payers=statement_payers,  # Pass per-card credits
+    )
 
     # ── Run min-flow algorithm ───────────────────────────────────────────────
     transfers = minimize_transfers(balances)
@@ -95,7 +134,7 @@ def compute_settlement(
     for t in transfers:
         from_name = member_lookup.get(t.from_member_id, f"Member {t.from_member_id}")
         to_name = member_lookup.get(t.to_member_id, f"Member {t.to_member_id}")
-        amount_str = f"${t.amount:.2f}"
+        amount_str = _fmt(t.amount, base_currency)
 
         transfer_items.append(TransferItem(
             from_member_id=t.from_member_id,
@@ -105,8 +144,8 @@ def compute_settlement(
             amount=t.amount,
             message=f"{from_name} owes {to_name} {amount_str}",
             payment_request=(
-                f"Hey {from_name}! You owe {to_name} {amount_str} for shared expenses "
-                f"this month. Please send it whenever you get a chance. Thanks!"
+                f"Hey {from_name}! You owe {to_name} {amount_str} for shared expenses. "
+                f"Please send it whenever you get a chance. Thanks!"
             ),
         ))
 
@@ -120,6 +159,7 @@ def compute_settlement(
         balances=balance_items,
         transfers=transfer_items,
         total_shared_expenses=round(total_shared, 2),
+        currency=base_currency,  # Pass to frontend so it formats amounts correctly
     )
 
 

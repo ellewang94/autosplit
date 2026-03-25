@@ -17,13 +17,19 @@ Base = declarative_base()
 class Group(Base):
     """
     A household or group of people sharing expenses.
-    Example: "The 3rd St Apartment"
+    Example: "The 3rd St Apartment" or "Japan Trip Jan 2026"
     """
     __tablename__ = "groups"
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    # Optional trip date range — transactions outside this window get auto-excluded on import
+    start_date = Column(String, nullable=True)  # ISO date e.g. "2026-01-05"
+    end_date = Column(String, nullable=True)    # ISO date e.g. "2026-01-19"
+    # The currency all expenses are settled in (e.g. "USD", "JPY").
+    # Foreign currency expenses get converted to this before settlement.
+    base_currency = Column(String, default="USD", nullable=False, server_default="USD")
 
     # One group → many members/statements/rules
     members = relationship("Member", back_populates="group", cascade="all, delete-orphan")
@@ -90,8 +96,14 @@ class Transaction(Base):
     statement_id = Column(Integer, ForeignKey("statements.id"), nullable=False)
     posted_date = Column(String, nullable=False)        # "2026-01-15" (ISO format)
     description_raw = Column(String, nullable=False)    # Exactly as it appears on statement
-    amount = Column(Float, nullable=False)
+    amount = Column(Float, nullable=False)              # Amount in the group's base currency
     txn_type = Column(String, default="purchase")       # "purchase" (future: "payment", "credit")
+    # Multi-currency support:
+    # currency = what currency the charge was made in (e.g. "JPY")
+    # original_amount = the amount in that foreign currency (e.g. 5000 for ¥5000)
+    # If currency == base_currency, original_amount will be null (same thing, no conversion needed)
+    currency = Column(String, default="USD", nullable=False, server_default="USD")
+    original_amount = Column(Float, nullable=True)      # null if same as base currency
     category = Column(String, nullable=True)            # "dining", "groceries", etc.
     is_personal = Column(Boolean, default=False)        # If True, excluded from splitting
 
@@ -112,6 +124,9 @@ class Transaction(Base):
 
     parse_confidence = Column(Float, default=1.0)
     txn_hash = Column(String, nullable=False, index=True)  # fingerprint for dedup
+    # Three-state review status (replaces the binary is_personal for bulk-editing workflows)
+    # "unreviewed" = needs attention, "confirmed" = user approved, "excluded" = not shared
+    status = Column(String, default="unreviewed")
 
     statement = relationship("Statement", back_populates="transactions")
 

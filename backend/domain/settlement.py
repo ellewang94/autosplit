@@ -16,7 +16,7 @@ It's not always globally optimal but in practice produces excellent results.
 """
 
 from dataclasses import dataclass
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from .splits import compute_shares
 
 
@@ -39,13 +39,16 @@ def compute_net_balances(
     transactions: List[Any],
     payer_member_id: int,
     all_member_ids: List[int],
+    statement_payers: Optional[Dict[int, int]] = None,  # {statement_id: member_id}
 ) -> Dict[int, float]:
     """
     Compute net balance for each member.
 
-    The card holder (payer_member_id) paid ALL charges on the statement.
-    For each non-personal transaction, we figure out what each participant owes.
-    The payer is owed all those amounts; participants owe their shares.
+    For single-card groups: the card holder (payer_member_id) paid ALL charges.
+    For multi-card trips: each statement has its own card holder in statement_payers.
+      → Alice's card credits Alice; Bob's card credits Bob.
+
+    The fallback payer_member_id covers statements with no card holder assigned.
 
     Returns: {member_id: net_balance}
       - Positive balance → member is owed money (they over-paid)
@@ -69,9 +72,14 @@ def compute_net_balances(
         split_method = txn.split_method_json or {"type": "equal"}
         shares = compute_shares(txn.amount, split_method, participant_ids)
 
+        # Figure out who actually paid for this transaction.
+        # Multi-card: look up the card holder for this specific statement.
+        # Single-card (or statement with no card holder): fall back to payer_member_id.
+        actual_payer = (statement_payers or {}).get(txn.statement_id, payer_member_id)
+
         # The card holder paid the full transaction amount
         # → their balance goes UP by the full amount
-        balances[payer_member_id] = balances.get(payer_member_id, 0.0) + txn.amount
+        balances[actual_payer] = balances.get(actual_payer, 0.0) + txn.amount
 
         # Each participant owes their share
         # → their balance goes DOWN by their share

@@ -60,16 +60,38 @@ The frontend (React) talks to the backend (FastAPI) via HTTP requests. The backe
 ```
 backend/
   adapters/chase_parser.py    ← Reads Chase PDFs
+  adapters/csv_parser.py      ← Reads bank CSVs (Chase, Amex, BofA, Citi, CapOne, Discover)
   domain/categories.py        ← Keyword → category matching
   domain/splits.py            ← Equal/percentage/exact split math
   domain/settlement.py        ← Who owes whom (the smart algorithm)
-  services/import_service.py  ← Orchestrates the upload flow
+  services/import_service.py  ← Orchestrates the upload + manual expense flow
   services/settlement_service.py ← Orchestrates settlement computation
   models/models.py            ← Database table definitions
   schemas/schemas.py          ← API request/response shapes
   api/routes.py               ← HTTP endpoints (thin wrappers)
   seed.py                     ← Sample data for demo
-  tests/                      ← 49 automated tests
+  Dockerfile                  ← Cloud deployment (Railway)
+  .env.example                ← Environment variable template
+  tests/
+    conftest.py               ← Shared test DB setup
+    shared.py                 ← Shared engine + client (avoids isolation bugs)
+    test_settlement.py        ← Settlement math (31 tests)
+    test_parser.py            ← PDF parsing + year inference (30 tests)
+    test_bulk_update.py       ← Bulk update + security (7 tests)
+    test_multi_payer.py       ← Multi-card settlement (8 tests)
+    test_csv_parser.py        ← All CSV bank formats (34 tests)
+    test_manual_expenses.py   ← Manual expense CRUD (20 tests)
+
+frontend/
+  src/api/client.js           ← All API calls in one place
+  src/components/Layout.jsx   ← Navigation + mobile sidebar
+  src/pages/GroupsPage.jsx    ← Trip list + creation
+  src/pages/TripOverviewPage.jsx ← Dashboard per trip
+  src/pages/UploadPage.jsx    ← PDF/CSV upload + statement management
+  src/pages/TransactionsPage.jsx ← Review + bulk-edit expenses
+  src/pages/SettlementPage.jsx ← Multi-card settlement with per-payer credits
+  vercel.json                 ← Cloud deployment config (Vercel)
+  .env.example                ← Environment variable template
 ```
 
 ### The "Layer Cake" Pattern
@@ -241,10 +263,72 @@ The architecture is designed for extension:
 - **New bank format?** Write `adapters/bofa_parser.py`. Zero other changes.
 - **New split method?** Add a function to `domain/splits.py` and a new `type` value.
 - **Group expenses (not credit card)?** Add a `payer_member_id` field to `Transaction` and adjust the settlement computation.
-- **Multi-currency?** Add `currency` and `exchange_rate` to `Transaction`. Settlement would need to convert to a base currency before running min-flow.
+- **New bank format?** Write `adapters/bofa_parser.py`. Zero other changes.
+- **New split method?** Add a function to `domain/splits.py` and a new `type` value.
+- **Authentication?** Supabase Auth is already in your Supabase project. Adding login is mostly frontend work.
 
 The domain layer being pure Python with zero dependencies means it's trivially portable — you could run the same settlement logic in a CLI, a Telegram bot, or a mobile app.
 
 ---
 
-*Built with FastAPI · SQLite · React · Tailwind. All data stays on your machine.*
+## Session 2: Going Big — Multi-currency, Mobile, CSV, Edit, Cloud Prep
+
+*A lot happened in the second big session. Here's what we built and what we learned.*
+
+### What we added
+
+**CSV Import** — We added a full CSV parser that auto-detects the bank format from the column headers. You don't tell it "this is a Chase file." It reads the first row and figures it out — Chase, Amex, Bank of America, Citi, Capital One, Discover, and a generic fallback. Each bank has its own quirks:
+
+- Chase: purchases are **negative** (we flip the sign)
+- Amex: purchases are also **negative** (confusingly, opposite of what you'd expect)
+- Discover: negative too (confirmed from real exports)
+- Citi & Capital One: separate Debit/Credit columns instead of one Amount column
+- BofA: negative purchases like Chase
+
+The key insight: the module docstring originally said "Amex: positive for purchases" but the actual code said "Amex: negative for purchases (confirmed from real exports)." When code and documentation contradict each other, **trust the code**. Real data from the actual bank matters more than what someone wrote in a comment.
+
+**Multi-currency** — The group has a `base_currency` (e.g., USD). When someone imports a statement in JPY or enters a ¥5,000 expense, we store two things:
+1. The converted base-currency amount ($33.50) — used for all settlement math
+2. The original foreign-currency amount (¥5,000) — displayed in the UI as "¥5,000 (≈$33.50)"
+
+This way the math always works in one currency, but users can see what they actually spent in the original currency.
+
+**Multi-card settlement** — The biggest UX problem in v1: a single "Who paid?" dropdown that made no sense for trips where multiple people used their own cards.
+
+The backend already supported this — it had a `statement_payers` dict that mapped each statement to its card holder. The frontend just wasn't using it.
+
+The redesign: instead of one dropdown, the settlement page shows each real imported statement with who holds that card (green checkmark if assigned, amber warning if not). The settlement automatically uses each card's holder as the payer for those transactions. The "fallback payer" dropdown only appears when some statements don't have a card holder assigned.
+
+**Mobile layout** — The sidebar needed to work on phones. The approach: CSS position `fixed` on mobile (overlays the content) with a slide animation, and `md:static` on desktop (which overrides `fixed` and puts it back in the normal document flow). The trick: Tailwind's `md:static` literally overrides the `fixed` property — they're not additive, the more specific class wins.
+
+**Edit transactions** — Users can now click a pencil icon on any transaction row to fix the date, amount, description, category, or participants. The edit modal pre-fills with the current values. The backend logs every change in `overrides_json` (old value → new value) for auditability.
+
+**Delete transactions and statements** — Hover over any row to reveal a trash icon. Clicking shows an inline "Delete? Yes / No" — no popup dialogs that browsers handle weirdly on mobile.
+
+**Manual expense entry** — No bank statement? No problem. Users can type in any expense: date, merchant, amount, who paid, who splits it. These land in a "virtual statement" — a fake container that exists purely because the database requires every transaction to belong to a statement. The virtual statement has a stable ID based on `manual:{group_id}:{member_id}` so it's found (not duplicated) on subsequent manual entries.
+
+### Bugs we hit in this session
+
+**The `is_manual` bug** — The frontend needed to distinguish real imported statements from manual expense containers. We initially used `period_start === null` as the signal, but CSV imports can also have null period_start. The fix: add an explicit `is_manual: bool` field to `StatementResponse`, computed server-side from whether `source_hash.startswith('manual:')`. Never infer intent from nullable data — add an explicit flag.
+
+**The `group` CSS class bug** — Tailwind's `group-hover:opacity-100` only works when the parent element has the `group` CSS class. The transaction table rows were missing it. Result: the hover-reveal action buttons were invisible forever. Simple fix, confusing symptom — `group` is the kind of class you add once and never think about again, which means you forget it when building new tables.
+
+**The test isolation bug** — Two test files both did `app.dependency_overrides[get_db] = override_get_db` at module level, each with their own in-memory database engine. When pytest imported both files, the second file's override silently overwrote the first's. Tests from the first file were now talking to the second file's database, which had empty tables. Result: "no such table: statements" errors that only appeared when running the full test suite (not when running one file at a time).
+
+The fix: a `conftest.py` + `shared.py` pattern. One shared engine, one override, applied once. Both test files import from `shared.py`. This is the standard pattern for pytest with FastAPI — it's worth knowing cold because this bug will bite you every time.
+
+**Sign convention confusion in CSV parsing** — The module docstring said "Amex: positive for purchases" but the code said "Amex: negative for purchases (confirmed from real exports)." When writing tests, I initially trusted the docstring and got failing tests. The lesson: when code and comments disagree, comments are wrong. Comments go stale. Code is what actually runs. The docstring was eventually updated to match the code.
+
+### Lessons for future you
+
+**Explicit beats inferred.** We could have inferred `is_manual` from other fields (null period_start, source_hash pattern). We explicitly added it as a response field instead. Explicit is always better — future code can read `is_manual` without knowing anything about internal conventions.
+
+**Multi-step confirmation is better than "Are you sure?"** Instead of a modal popup for delete confirmation, we use inline "Delete? Yes / No" that appears in the same row. It's less disruptive, faster to interact with, and doesn't block the screen on mobile.
+
+**Write tests that fail first.** Every one of the bugs above was found by writing a test that correctly described the expected behavior, watching it fail, then fixing the code until it passed. The alternative — just fixing the code and hoping — leaves you unsure whether the fix actually works.
+
+**Separation of test infrastructure from test logic.** The conftest.py / shared.py split: infrastructure (engine creation, override setup, table lifecycle) goes in shared files. Business logic tests stay focused on what they're actually testing. This is why the tests are readable — `test_jpy_converted_to_usd()` doesn't need to care how the database is set up.
+
+---
+
+*Built with FastAPI · SQLite → PostgreSQL · React · Tailwind · Railway · Supabase · Vercel.*

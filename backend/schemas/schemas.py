@@ -29,13 +29,21 @@ class MemberResponse(BaseModel):
 
 class GroupCreate(BaseModel):
     name: str
+    start_date: Optional[str] = None  # ISO date e.g. "2026-01-05"
+    end_date: Optional[str] = None    # ISO date e.g. "2026-01-19"
+    # The settlement currency for this group — all foreign expenses get converted to this
+    base_currency: str = "USD"
 
 class GroupResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     name: str
     created_at: Any
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
     members: List[MemberResponse] = []
+    # Return the group's settlement currency to the frontend
+    base_currency: str = "USD"
 
 
 # ─── Statements ───────────────────────────────────────────────────────────────
@@ -50,16 +58,26 @@ class StatementResponse(BaseModel):
     uploaded_at: Any
     card_holder_member_id: Optional[int]
     transaction_count: int = 0
+    # True for the virtual "Manual Expenses" containers that hold manually-entered
+    # expenses. These are not real uploaded files and should be hidden from the
+    # statement list and settlement config UI.
+    is_manual: bool = False
 
 
 # ─── Transactions ─────────────────────────────────────────────────────────────
 
 class TransactionUpdate(BaseModel):
     """Fields the user can override on a transaction."""
+    # Core fields — useful for fixing PDF/CSV parsing errors or manual entry mistakes
+    amount: Optional[float] = None
+    posted_date: Optional[str] = None       # ISO date "YYYY-MM-DD"
+    description_raw: Optional[str] = None  # merchant name / description
+    # Classification fields
     category: Optional[str] = None
     is_personal: Optional[bool] = None
     participants_json: Optional[dict] = None
     split_method_json: Optional[dict] = None
+    status: Optional[str] = None  # "unreviewed" | "confirmed" | "excluded"
 
 class TransactionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -67,7 +85,7 @@ class TransactionResponse(BaseModel):
     statement_id: int
     posted_date: str
     description_raw: str
-    amount: float
+    amount: float                           # Amount in the group's base currency
     txn_type: str
     category: Optional[str]
     is_personal: bool
@@ -76,6 +94,19 @@ class TransactionResponse(BaseModel):
     overrides_json: Optional[dict]
     parse_confidence: float
     txn_hash: str
+    status: str = "unreviewed"
+    # Multi-currency fields — frontend uses these to show "¥5,000 (≈$33.50)"
+    currency: str = "USD"                   # The currency the charge was made in
+    original_amount: Optional[float] = None # Amount in foreign currency (null if same as base)
+
+class BulkTransactionUpdate(BaseModel):
+    """Bulk-update multiple transactions at once — the core trip workflow."""
+    transaction_ids: List[int]
+    category: Optional[str] = None
+    is_personal: Optional[bool] = None
+    participants_json: Optional[dict] = None
+    split_method_json: Optional[dict] = None
+    status: Optional[str] = None
 
 
 # ─── Merchant Rules ───────────────────────────────────────────────────────────
@@ -133,9 +164,49 @@ class UploadResponse(BaseModel):
     statement_id: int
     transaction_count: int
     needs_review_count: int  # transactions with participants_json.type == "ask"
+    excluded_by_date_count: int = 0  # transactions outside the trip date range
     message: str
 
 class SaveMerchantRuleRequest(BaseModel):
     """Request to save a merchant rule from a transaction override."""
     transaction_id: int
     merchant_key: Optional[str] = None  # if None, we auto-compute from description
+
+
+# ─── Manual Expense Entry ──────────────────────────────────────────────────────
+
+class ManualTransactionCreate(BaseModel):
+    """
+    Data the user fills in when manually adding an expense (no bank statement needed).
+
+    Every field maps directly to what a user would fill in on a form:
+    - posted_date: when the expense happened ("2026-01-15")
+    - description: what the merchant / expense was ("Dinner at Nobu")
+    - amount: how much was spent (positive number, e.g. 124.50)
+    - paid_by_member_id: which group member's card / cash paid for it
+    - category: optional override — if omitted we auto-detect from the description
+    - participants_json: who splits this expense — defaults to all members equally
+    - split_method_json: how to split — defaults to equal
+    - currency: what currency the charge was made in (e.g. "JPY")
+    - original_amount: amount in the original foreign currency (null if same as base)
+    - exchange_rate: how many base-currency units one foreign-currency unit is worth
+                     (e.g. 0.0067 means 1 JPY = 0.0067 USD)
+    """
+    posted_date: str                             # ISO date "YYYY-MM-DD"
+    description: str                             # merchant name or free-text label
+    amount: float                                # positive number (in stated currency)
+    paid_by_member_id: int                       # member who paid
+    category: Optional[str] = None              # auto-detected if omitted
+    participants_json: Optional[dict] = None    # {"type": "all", "member_ids": [...]}
+    split_method_json: Optional[dict] = None    # {"type": "equal"} etc.
+    # Multi-currency: if currency differs from the group's base_currency, provide exchange_rate
+    currency: str = "USD"                       # currency the expense was charged in
+    original_amount: Optional[float] = None    # amount in foreign currency (set by service)
+    exchange_rate: Optional[float] = None      # 1 foreign unit = exchange_rate base units
+
+
+class ManualTransactionResponse(BaseModel):
+    """Returned after successfully creating a manual expense."""
+    transaction_id: int
+    statement_id: int
+    message: str
