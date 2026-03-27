@@ -84,6 +84,8 @@ def run_migrations():
         new_columns = [
             # Groups table — settlement currency for the whole trip
             ("groups", "base_currency", "VARCHAR DEFAULT 'USD' NOT NULL"),
+            # Groups table — cloud auth: which user owns this trip
+            ("groups", "owner_id", "VARCHAR"),  # Supabase UUID; nullable for legacy local groups
             # Transactions table — multi-currency support
             ("transactions", "currency",         "VARCHAR DEFAULT 'USD' NOT NULL"),
             ("transactions", "original_amount",  "FLOAT"),  # nullable, null = same as base
@@ -97,3 +99,23 @@ def run_migrations():
             except Exception:
                 # Most likely error: "duplicate column name" — totally fine, just skip it
                 conn.rollback()
+
+        # Create the trip_shares table if it doesn't exist yet.
+        # We can't use ALTER TABLE for a whole new table, so we use CREATE TABLE IF NOT EXISTS.
+        # This is safe to run every startup — the IF NOT EXISTS clause prevents duplicates.
+        try:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS trip_shares (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    share_code VARCHAR UNIQUE NOT NULL,
+                    group_id INTEGER NOT NULL REFERENCES groups(id),
+                    created_by VARCHAR NOT NULL,
+                    payer_member_id INTEGER,
+                    created_at DATETIME,
+                    view_count INTEGER NOT NULL DEFAULT 0
+                )
+            """))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_trip_shares_share_code ON trip_shares(share_code)"))
+            conn.commit()
+        except Exception:
+            conn.rollback()

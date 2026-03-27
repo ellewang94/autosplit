@@ -210,3 +210,68 @@ class ManualTransactionResponse(BaseModel):
     transaction_id: int
     statement_id: int
     message: str
+
+
+# ─── Trip Share ───────────────────────────────────────────────────────────────
+
+class TripShareCreate(BaseModel):
+    """Request to create (or return existing) share link for a trip settlement."""
+    # The payer we used on the settlement page — captures which member is the reference
+    payer_member_id: int
+
+class TripShareResponse(BaseModel):
+    """Returned when creating a share link."""
+    share_code: str          # The UUID code used in the URL, e.g. "a8f3c2d1-..."
+    share_url: str           # The full URL the user can share
+    created_at: Any
+    view_count: int = 0
+
+class PublicMember(BaseModel):
+    """A trip member, safe to show publicly."""
+    id: int
+    name: str
+
+class PublicTransfer(BaseModel):
+    """One 'X owes Y $Z' row — safe to show on the public share page."""
+    from_member_name: str
+    to_member_name: str
+    amount: float
+    message: str             # "Alice owes Bob $47.50"
+    payment_request: str     # Full copyable message: "Hey Alice! You owe Bob..."
+
+class PublicTripView(BaseModel):
+    """
+    Everything needed to render the public share page.
+    Contains no sensitive user data — only trip name, members, and settlement math.
+    """
+    trip_name: str
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    members: List[PublicMember]
+    currency: str
+    total_shared_expenses: float
+    transfers: List[PublicTransfer]
+    transaction_count: int   # Total number of transactions in the trip
+    view_count: int          # How many times this share has been viewed
+
+
+# ─── Feedback ──────────────────────────────────────────────────────────────────
+
+class FeedbackCreate(BaseModel):
+    """
+    User-submitted feedback from the in-app feedback widget.
+    Collected during early rollout to improve the product.
+    """
+    feedback_type: str          # "bug" | "feature" | "other"
+    message: str                # required — what they want to say
+    email: Optional[str] = None # optional — only if they want a reply
+    page: Optional[str] = None  # which page they were on (e.g. "/groups/3/upload")
+
+class FeedbackResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    feedback_type: str
+    message: str
+    email: Optional[str] = None
+    page: Optional[str] = None
+    created_at: Any

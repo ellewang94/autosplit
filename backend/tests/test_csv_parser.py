@@ -280,8 +280,8 @@ class TestCitiCsvParsing:
 
 class TestAmexCsvParsing:
     """
-    Amex (confirmed from real exports): NEGATIVE = purchase, POSITIVE = payment.
-    This is the same sign convention as Chase, not what you might intuitively expect.
+    Amex (confirmed from real exports): POSITIVE = purchase, NEGATIVE = payment/credit.
+    This is the OPPOSITE of Chase — Amex exports charges as positive numbers.
     """
 
     def _make_csv(self, *rows):
@@ -289,20 +289,20 @@ class TestAmexCsvParsing:
         return csv_bytes(header, *rows)
 
     def test_purchase_imported(self):
-        """Amex purchases are negative — we flip the sign when importing."""
-        csv = self._make_csv("01/15/2026,NOBU RESTAURANT,-124.50")
+        """Amex purchases are positive — imported as-is."""
+        csv = self._make_csv("01/15/2026,NOBU RESTAURANT,124.50")
         result = parse_bank_csv(csv)
         assert len(result.transactions) == 1
-        assert result.transactions[0].amount == 124.50   # stored as positive
+        assert result.transactions[0].amount == 124.50
 
     def test_refund_skipped_and_purchase_imported(self):
         """
-        Positive amounts in Amex = payments/refunds — we skip them.
-        Include a real purchase so the parser can return a result.
+        Negative amounts in Amex = payments/credits — we skip them.
+        Include a real purchase (positive) so the parser can return a result.
         """
         csv = self._make_csv(
-            "01/12/2026,RETURN AMAZON.COM,42.00",   # positive = refund (skipped)
-            "01/15/2026,STARBUCKS,-5.50",            # negative = purchase (kept)
+            "01/12/2026,ONLINE PAYMENT - THANK YOU,-500.00",  # negative = payment (skipped)
+            "01/15/2026,STARBUCKS,5.50",                       # positive = purchase (kept)
         )
         result = parse_bank_csv(csv)
         assert len(result.transactions) == 1

@@ -77,8 +77,9 @@ BANK_FORMATS = [
         "amount_col": "Amount",
         "debit_col": None,
         "credit_col": None,
-        # Amex: negative = purchase, positive = payment (confirmed from real exports)
-        "amount_is_negative_for_purchases": True,
+        # Amex: POSITIVE = purchase, negative = payment/credit (confirmed from real exports)
+        # This is the OPPOSITE of Chase — Amex exports charges as positive numbers.
+        "amount_is_negative_for_purchases": False,
     },
     {
         "bank": "Bank of America",

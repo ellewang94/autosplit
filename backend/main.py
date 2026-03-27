@@ -12,6 +12,12 @@ To run:
 """
 
 import os
+from dotenv import load_dotenv
+
+# Load .env file FIRST, before anything else reads environment variables.
+# In production (Railway), env vars are injected directly — load_dotenv() is harmless there.
+load_dotenv()
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import init_db, run_migrations

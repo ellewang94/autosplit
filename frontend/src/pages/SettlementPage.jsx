@@ -5,7 +5,7 @@ import { api } from '../api/client'
 import {
   TrendingUp, ArrowRight, Download, Copy, CheckCircle,
   Users, DollarSign, AlertTriangle, ChevronDown, Loader,
-  CreditCard, Check, ExternalLink,
+  CreditCard, Check, ExternalLink, Link2, Link2Off, Eye,
 } from 'lucide-react'
 import clsx from 'clsx'
 
@@ -224,6 +224,91 @@ function CardHoldersSummary({ statements, members, groupId }) {
   )
 }
 
+// ── Share trip button + panel ────────────────────────────────────────────────
+// Shows after settlement is computed. Creates a public share link and lets
+// the user copy it or revoke it.
+function SharePanel({ groupId, effectivePayerId }) {
+  const [shareUrl, setShareUrl] = useState(null)
+  const [copied, setCopied] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [revoking, setRevoking] = useState(false)
+
+  async function handleShare() {
+    setLoading(true)
+    try {
+      const result = await api.createShare(groupId, effectivePayerId)
+      setShareUrl(result.share_url)
+    } catch (e) {
+      // Silently fail — share is non-critical
+      console.error('Share failed:', e)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleRevoke() {
+    setRevoking(true)
+    try {
+      await api.revokeShare(groupId)
+      setShareUrl(null)
+    } catch (e) {
+      console.error('Revoke failed:', e)
+    } finally {
+      setRevoking(false)
+    }
+  }
+
+  function copyLink() {
+    navigator.clipboard.writeText(shareUrl)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  if (!shareUrl) {
+    return (
+      <button
+        className="btn-secondary text-xs"
+        onClick={handleShare}
+        disabled={loading}
+      >
+        {loading ? <Loader size={12} className="animate-spin" /> : <Link2 size={12} />}
+        {loading ? 'Creating link…' : 'Share trip'}
+      </button>
+    )
+  }
+
+  return (
+    <div className="flex items-center gap-2 bg-ink-800/60 border border-lime-400/20 rounded-xl px-3 py-2">
+      {/* Link icon */}
+      <Link2 size={12} className="text-lime-400 flex-shrink-0" />
+      {/* The URL — truncated but still shows domain */}
+      <span className="text-xs text-ink-300 font-mono truncate flex-1 min-w-0">
+        {shareUrl.replace(/^https?:\/\//, '')}
+      </span>
+      {/* Copy */}
+      <button
+        onClick={copyLink}
+        className={clsx('flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-lg transition-colors',
+          copied ? 'text-lime-400' : 'text-ink-400 hover:text-ink-200'
+        )}
+      >
+        {copied ? <CheckCircle size={11} /> : <Copy size={11} />}
+        {copied ? 'Copied!' : 'Copy'}
+      </button>
+      {/* Revoke */}
+      <button
+        onClick={handleRevoke}
+        disabled={revoking}
+        title="Revoke share link"
+        className="text-ink-600 hover:text-red-400 transition-colors p-1"
+      >
+        <Link2Off size={12} />
+      </button>
+    </div>
+  )
+}
+
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function SettlementPage() {
   const { groupId } = useParams()
@@ -249,6 +334,18 @@ export default function SettlementPage() {
     queryKey: ['statements', groupId],
     queryFn: () => api.getStatements(groupId),
   })
+
+  // Fetch transactions so we can warn if any still need participant assignment
+  const { data: allTransactions = [] } = useQuery({
+    queryKey: ['group-transactions', groupId],
+    queryFn: () => api.getGroupTransactions(groupId),
+  })
+
+  // Count transactions that are genuinely unresolved: type="ask" or "single" with no members set
+  const needsReviewCount = allTransactions.filter(t =>
+    t.participants_json?.type === 'ask'
+    || (t.participants_json?.type === 'single' && !t.participants_json?.member_ids?.length)
+  ).length
 
   const members = group?.members || []
   const currency = group?.base_currency || 'USD'
@@ -452,8 +549,8 @@ export default function SettlementPage() {
             </div>
           </div>
 
-          {/* Export buttons */}
-          <div className="flex gap-2 mb-6">
+          {/* Export + Share buttons */}
+          <div className="flex flex-wrap items-center gap-2 mb-6">
             <button
               className="btn-secondary text-xs"
               onClick={() => api.exportCSV(groupId, effectivePayerId, statementId ? parseInt(statementId) : null)}
@@ -468,6 +565,8 @@ export default function SettlementPage() {
               <Download size={12} />
               Export JSON
             </button>
+            {/* Share trip — generates a public read-only link anyone can open */}
+            <SharePanel groupId={groupId} effectivePayerId={effectivePayerId} />
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -513,19 +612,20 @@ export default function SettlementPage() {
             </div>
           </div>
 
-          {/* Unreviewed warning */}
-          {settlement.balances.some(b => Math.abs(b.balance) < 0.01) && settlement.transfers.length > 0 && (
+          {/* Warning: unresolved "needs review" transactions affect accuracy */}
+          {needsReviewCount > 0 && (
             <div className="mt-6 card-sm border-amber-400/20 bg-amber-400/5 flex gap-2">
               <AlertTriangle size={14} className="text-amber-400 flex-shrink-0 mt-0.5" />
               <p className="text-xs text-ink-300">
-                Some transactions may still need participant assignment. Head to the{' '}
+                <span className="font-semibold text-amber-400">{needsReviewCount} transaction{needsReviewCount !== 1 ? 's' : ''} still need{needsReviewCount === 1 ? 's' : ''} participant assignment</span>
+                {' '}and are excluded from this settlement. Head to the{' '}
                 <button
                   className="text-lime-400 underline"
                   onClick={() => navigate(`/groups/${groupId}/transactions`)}
                 >
                   Transactions tab
-                </button>{' '}
-                to review them before finalizing.
+                </button>
+                {' '}→ "Needs Review" filter to resolve them.
               </p>
             </div>
           )}

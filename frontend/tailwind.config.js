@@ -22,10 +22,12 @@ export default {
           800: '#111118',
           700: '#1A1A24',
           600: '#252530',
-          500: '#3A3A4A',
-          400: '#5A5A70',
-          300: '#8A8AA0',
-          200: '#B0B0C4',
+          // ink-500 and ink-400 were too dark to read as text on dark backgrounds.
+          // New values pass WCAG AA contrast (4.5:1) on ink-900 backgrounds.
+          500: '#666680',  // was #3A3A4A — lightened significantly for readable muted text
+          400: '#8888A8',  // was #5A5A70 — now ~5.7:1 contrast on ink-900
+          300: '#A8A8C0',  // was #8A8AA0 — slightly lighter to maintain the gradient step
+          200: '#C0C0D4',  // was #B0B0C4 — slightly lighter
           100: '#D8D8E8',
           50:  '#F0F0F8',
         },

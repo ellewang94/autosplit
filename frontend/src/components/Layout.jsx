@@ -1,11 +1,143 @@
 import { useState, useEffect } from 'react'
 import { Outlet, NavLink, Link, useLocation } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation } from '@tanstack/react-query'
 import { api } from '../api/client'
+import { useAuth } from '../contexts/AuthContext'
 import {
   Users, Upload, List, TrendingUp, ChevronRight, Zap, LayoutDashboard, Menu, X,
+  MessageSquare, CheckCircle, Bug, Lightbulb, HelpCircle, LogOut, User,
 } from 'lucide-react'
 import clsx from 'clsx'
+
+
+// ── Feedback Modal ─────────────────────────────────────────────────────────────
+// A small modal the user can open anytime to send a bug report or feature request.
+// Keeps the feedback loop tight during early rollout.
+function FeedbackModal({ onClose, currentPage }) {
+  const [type, setType] = useState('feature')
+  const [message, setMessage] = useState('')
+  const [email, setEmail] = useState('')
+  const [submitted, setSubmitted] = useState(false)
+
+  const submit = useMutation({
+    mutationFn: () => api.submitFeedback(type, message, email || null, currentPage),
+    onSuccess: () => setSubmitted(true),
+  })
+
+  const TYPES = [
+    { value: 'bug',     label: 'Bug',            icon: Bug },
+    { value: 'feature', label: 'Feature Request', icon: Lightbulb },
+    { value: 'other',   label: 'Other',           icon: HelpCircle },
+  ]
+
+  return (
+    // Backdrop
+    <div
+      className="fixed inset-0 z-[100] flex items-end md:items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div className="w-full max-w-sm bg-ink-900 border border-ink-700 rounded-2xl shadow-2xl overflow-hidden animate-slide-up">
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-ink-800">
+          <div className="flex items-center gap-2">
+            <MessageSquare size={15} className="text-lime-400" />
+            <span className="font-display font-semibold text-ink-100 text-sm">Give Feedback</span>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1 rounded-lg text-ink-500 hover:text-ink-200 hover:bg-ink-800 transition-colors"
+          >
+            <X size={15} />
+          </button>
+        </div>
+
+        {submitted ? (
+          // Success state
+          <div className="px-5 py-8 text-center">
+            <CheckCircle size={32} className="text-lime-400 mx-auto mb-3" strokeWidth={1.5} />
+            <p className="font-display font-semibold text-ink-100 mb-1">Thanks!</p>
+            <p className="text-sm text-ink-400">Your feedback helps make AutoSplit better.</p>
+            <button
+              className="btn-secondary mt-5 mx-auto"
+              onClick={onClose}
+            >
+              Close
+            </button>
+          </div>
+        ) : (
+          <div className="px-5 py-4 space-y-4">
+
+            {/* Type selector */}
+            <div>
+              <label className="label mb-2">What kind of feedback?</label>
+              <div className="grid grid-cols-3 gap-2">
+                {TYPES.map(({ value, label, icon: Icon }) => (
+                  <button
+                    key={value}
+                    onClick={() => setType(value)}
+                    className={clsx(
+                      'flex flex-col items-center gap-1.5 py-3 rounded-xl border-2 text-xs font-medium transition-all',
+                      type === value
+                        ? 'border-lime-400/60 bg-lime-400/5 text-lime-400'
+                        : 'border-ink-700 text-ink-400 hover:border-ink-500 hover:text-ink-200'
+                    )}
+                  >
+                    <Icon size={16} strokeWidth={1.75} />
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Message */}
+            <div>
+              <label className="label mb-1.5">Tell us more</label>
+              <textarea
+                className="input w-full resize-none text-sm"
+                rows={4}
+                placeholder={
+                  type === 'bug'
+                    ? 'What happened? What did you expect to happen?'
+                    : type === 'feature'
+                    ? "What would make AutoSplit more useful for you?"
+                    : "What's on your mind?"
+                }
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                autoFocus
+              />
+            </div>
+
+            {/* Email (optional) */}
+            <div>
+              <label className="label mb-1.5">
+                Email <span className="text-ink-600 font-normal">(optional)</span>
+              </label>
+              <input
+                type="email"
+                className="input w-full text-sm"
+                placeholder="reply@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+              <p className="text-xs text-ink-600 mt-1.5">Only if you'd like a response</p>
+            </div>
+
+            {/* Submit */}
+            <button
+              className="btn-primary w-full justify-center"
+              onClick={() => submit.mutate()}
+              disabled={!message.trim() || submit.isPending}
+            >
+              {submit.isPending ? 'Sending…' : 'Send Feedback'}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
 
 // Top-level navigation items (group-agnostic)
 const TOP_NAV = [
@@ -73,7 +205,9 @@ function GroupNav({ groupId, onNavigate }) {
 }
 
 // The sidebar nav content — shared between desktop and mobile
-function SidebarContent({ groupId, onNavigate }) {
+function SidebarContent({ groupId, onNavigate, onFeedback }) {
+  const { user, signOut } = useAuth()
+
   return (
     <>
       {/* Logo */}
@@ -120,9 +254,39 @@ function SidebarContent({ groupId, onNavigate }) {
       </nav>
 
       {/* Footer */}
-      <div className="px-4 py-3 border-t border-ink-800">
-        <p className="text-xs text-ink-600 font-mono">No auth · No cloud</p>
-        <p className="text-xs text-ink-600 font-mono">Your data stays local</p>
+      <div className="px-3 py-3 border-t border-ink-800 space-y-1.5">
+
+        {/* Feedback button */}
+        <button
+          onClick={onFeedback}
+          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium text-ink-400 hover:text-lime-400 hover:bg-lime-400/5 border border-transparent hover:border-lime-400/20 transition-all duration-150"
+        >
+          <MessageSquare size={13} strokeWidth={1.75} />
+          Give Feedback
+        </button>
+
+        {/* User info + sign-out */}
+        {user && (
+          <div className="flex items-center gap-2 px-2 py-1.5">
+            {/* Avatar circle showing first letter of email */}
+            <div className="w-6 h-6 rounded-full bg-lime-400/15 border border-lime-400/30 flex items-center justify-center flex-shrink-0">
+              <User size={11} className="text-lime-400" />
+            </div>
+            {/* Email — truncated if too long */}
+            <span className="text-[11px] text-ink-500 font-mono truncate flex-1 min-w-0">
+              {user.email}
+            </span>
+            {/* Sign-out button */}
+            <button
+              onClick={signOut}
+              title="Sign out"
+              className="flex-shrink-0 p-1 rounded-md text-ink-600 hover:text-ink-300 hover:bg-ink-800 transition-colors"
+            >
+              <LogOut size={12} />
+            </button>
+          </div>
+        )}
+
       </div>
     </>
   )
@@ -130,6 +294,7 @@ function SidebarContent({ groupId, onNavigate }) {
 
 export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [feedbackOpen, setFeedbackOpen] = useState(false)
   const location = useLocation()
 
   // Extract groupId from URL like /groups/3/transactions
@@ -137,7 +302,6 @@ export default function Layout() {
   const groupId = match ? match[1] : null
 
   // Close mobile sidebar whenever the route changes
-  // (user tapped a nav link — we're done with the drawer)
   useEffect(() => {
     setSidebarOpen(false)
   }, [location.pathname])
@@ -192,7 +356,7 @@ export default function Layout() {
         // Desktop: back to normal flow, always visible
         'md:static md:translate-x-0',
       )}>
-        <SidebarContent groupId={groupId} onNavigate={closeSidebar} />
+        <SidebarContent groupId={groupId} onNavigate={closeSidebar} onFeedback={() => { setSidebarOpen(false); setFeedbackOpen(true) }} />
       </aside>
 
       {/* ── Main content ──────────────────────────────────────────────────────
@@ -205,6 +369,14 @@ export default function Layout() {
           <Outlet />
         </div>
       </main>
+
+      {/* Feedback modal — rendered at root level so it overlays everything */}
+      {feedbackOpen && (
+        <FeedbackModal
+          onClose={() => setFeedbackOpen(false)}
+          currentPage={location.pathname}
+        />
+      )}
     </div>
   )
 }

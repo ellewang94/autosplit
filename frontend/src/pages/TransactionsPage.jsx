@@ -326,37 +326,78 @@ function EditTransactionModal({ transaction, members, baseCurrency, onClose }) {
   const [participantIds, setParticipantIds] = useState(initIds)
   const [error, setError] = useState('')
 
+  // ── Split method state ──────────────────────────────────────────────────────
+  // Read the existing split_method_json to pre-fill the split mode selector
+  const initSplitMode = transaction.split_method_json?.type || 'equal'
+  const [splitMode, setSplitMode] = useState(initSplitMode)
+
+  // Pre-fill percentages from existing data, or equal distribution as fallback
+  const [percentages, setPercentages] = useState(() => {
+    const existing = transaction.split_method_json?.percentages
+    if (existing) return Object.fromEntries(Object.entries(existing).map(([k, v]) => [k, String(v)]))
+    const share = members.length > 0 ? (100 / members.length) : 0
+    return Object.fromEntries(members.map(m => [String(m.id), String(share.toFixed(1))]))
+  })
+
+  // Pre-fill exact amounts from existing data, or empty strings
+  const [exactAmounts, setExactAmounts] = useState(() => {
+    const existing = transaction.split_method_json?.amounts
+    if (existing) return Object.fromEntries(Object.entries(existing).map(([k, v]) => [k, String(v)]))
+    return Object.fromEntries(members.map(m => [String(m.id), '']))
+  })
+
   const toggleParticipant = (id) =>
     setParticipantIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
 
-  // Check if current participants = all members (shorthand for "type: all")
   const isAllSelected = participantIds.length === members.length
+
+  // ── Split validation ──────────────────────────────────────────────────────
+  const expenseAmount = parseFloat(amount) || 0
+  const percentageTotal = participantIds.reduce((sum, id) => sum + (parseFloat(percentages[String(id)]) || 0), 0)
+  const exactTotal = participantIds.reduce((sum, id) => sum + (parseFloat(exactAmounts[String(id)]) || 0), 0)
+  const percentageValid = Math.abs(percentageTotal - 100) < 0.01
+  const exactValid = Math.abs(exactTotal - expenseAmount) < 0.01
+
+  // ── Build split_method_json for the backend ─────────────────────────────
+  function buildSplitMethod() {
+    if (splitMode === 'percentage') {
+      const percs = {}
+      participantIds.forEach(id => { percs[String(id)] = parseFloat(percentages[String(id)]) || 0 })
+      return { type: 'percentage', percentages: percs }
+    }
+    if (splitMode === 'exact') {
+      const amounts = {}
+      participantIds.forEach(id => { amounts[String(id)] = parseFloat(exactAmounts[String(id)]) || 0 })
+      return { type: 'exact', amounts }
+    }
+    return { type: 'equal' }
+  }
+
+  const splitValid = splitMode === 'equal'
+    || (splitMode === 'percentage' && percentageValid)
+    || (splitMode === 'exact' && exactValid)
 
   const save = useMutation({
     mutationFn: () => api.updateTransaction(transaction.id, {
-      // Only send fields the user can edit — the backend ignores null fields
       posted_date: date,
       description_raw: description.trim(),
       amount: parseFloat(amount),
       category: category || null,
-      // Rebuild participants_json from the selected IDs
       participants_json: isAllSelected
         ? { type: 'all', member_ids: members.map(m => m.id) }
         : { type: 'custom', member_ids: participantIds },
+      split_method_json: buildSplitMethod(),
     }),
     onSuccess: () => {
-      // Refresh the transactions list with the updated data
       qc.invalidateQueries(['group-transactions', transaction.statement_id])
-      // Also invalidate the broader group-level query used by this page
       qc.invalidateQueries({ predicate: q => q.queryKey[0] === 'group-transactions' })
       onClose()
     },
     onError: (err) => setError(err.message || 'Save failed'),
   })
 
-  const canSubmit = description.trim() && parseFloat(amount) > 0 && participantIds.length > 0 && !save.isPending
+  const canSubmit = description.trim() && parseFloat(amount) > 0 && participantIds.length > 0 && splitValid && !save.isPending
 
-  // Format how the amount label appears: "$42.50 (USD)" or "¥5,000 (JPY)"
   const sym = CURRENCY_SYMBOLS[baseCurrency] || baseCurrency + ' '
 
   return (
@@ -368,7 +409,7 @@ function EditTransactionModal({ transaction, members, baseCurrency, onClose }) {
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-ink-800 flex-shrink-0">
           <h2 className="font-display text-lg font-semibold text-ink-50">Edit Transaction</h2>
-          <button onClick={onClose} className="text-ink-500 hover:text-ink-200 transition-colors">
+          <button onClick={onClose} className="text-ink-400 hover:text-ink-200 transition-colors">
             <X size={18} />
           </button>
         </div>
@@ -438,7 +479,7 @@ function EditTransactionModal({ transaction, members, baseCurrency, onClose }) {
                   All
                 </button>
                 <button
-                  className="text-[10px] text-ink-500 hover:text-ink-300 transition-colors"
+                  className="text-[10px] text-ink-400 hover:text-ink-300 transition-colors"
                   onClick={() => setParticipantIds([])}
                 >
                   None
@@ -454,7 +495,7 @@ function EditTransactionModal({ transaction, members, baseCurrency, onClose }) {
                     'px-2.5 py-1 rounded-full text-xs font-medium transition-colors border',
                     participantIds.includes(m.id)
                       ? 'bg-lime-400/10 border-lime-400/40 text-lime-300'
-                      : 'bg-ink-800 border-ink-600 text-ink-500 hover:border-ink-400 hover:text-ink-300'
+                      : 'bg-ink-800 border-ink-600 text-ink-400 hover:border-ink-400 hover:text-ink-300'
                   )}
                 >
                   {m.name}
@@ -465,6 +506,151 @@ function EditTransactionModal({ transaction, members, baseCurrency, onClose }) {
               <p className="text-xs text-amber-400 mt-1.5">Select at least one participant</p>
             )}
           </div>
+
+          {/* ── Split method selector ───────────────────────────────────────── */}
+          {participantIds.length > 0 && (
+            <div>
+              <label className="block text-xs text-ink-400 mb-2">Split method</label>
+
+              {/* Equal / Percentage / Exact toggle */}
+              <div className="flex gap-1 p-1 bg-ink-800 rounded-lg mb-3">
+                {[
+                  { key: 'equal',      label: 'Equal' },
+                  { key: 'percentage', label: 'Percentage' },
+                  { key: 'exact',      label: 'Exact' },
+                ].map(({ key, label }) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setSplitMode(key)}
+                    className={clsx(
+                      'flex-1 text-xs py-1.5 px-2 rounded-md transition-all font-medium',
+                      splitMode === key
+                        ? 'bg-lime-400 text-ink-950 shadow-sm'
+                        : 'text-ink-400 hover:text-ink-200'
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Equal: just shows the per-person amount */}
+              {splitMode === 'equal' && (
+                <p className="text-xs text-ink-400">
+                  {sym}{expenseAmount.toFixed(2)} divided equally among {participantIds.length} participant{participantIds.length !== 1 ? 's' : ''}.
+                  {expenseAmount > 0 && (
+                    <span className="text-ink-300 ml-1">
+                      ({sym}{(expenseAmount / participantIds.length).toFixed(2)} each)
+                    </span>
+                  )}
+                </p>
+              )}
+
+              {/* Percentage: one input per participant + running total */}
+              {splitMode === 'percentage' && (
+                <div className="space-y-2">
+                  {participantIds.map(id => {
+                    const member = members.find(m => m.id === id)
+                    if (!member) return null
+                    return (
+                      <div key={id} className="flex items-center gap-3">
+                        <span className="text-sm text-ink-300 w-24 truncate flex-shrink-0">{member.name}</span>
+                        <div className="relative flex-1">
+                          <input
+                            type="number" min="0" max="100" step="0.1"
+                            className="input w-full text-sm pr-7"
+                            value={percentages[String(id)] ?? ''}
+                            onChange={(e) => setPercentages(prev => ({ ...prev, [String(id)]: e.target.value }))}
+                          />
+                          <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-ink-400 text-xs">%</span>
+                        </div>
+                        {/* Dollar equivalent of the percentage */}
+                        {expenseAmount > 0 && percentages[String(id)] && (
+                          <span className="text-xs text-ink-400 w-16 text-right flex-shrink-0">
+                            {sym}{((parseFloat(percentages[String(id)]) || 0) / 100 * expenseAmount).toFixed(2)}
+                          </span>
+                        )}
+                      </div>
+                    )
+                  })}
+                  {/* Running total — red when not 100% */}
+                  <div className={clsx(
+                    'flex items-center justify-between text-xs px-2 py-1.5 rounded-lg border',
+                    percentageValid
+                      ? 'bg-lime-400/5 border-lime-400/20 text-lime-400'
+                      : 'bg-red-400/5 border-red-400/20 text-red-400'
+                  )}>
+                    <span>Total</span>
+                    <span className="font-mono font-semibold">
+                      {percentageTotal.toFixed(1)}% {percentageValid ? '— perfect!' : '— must equal 100%'}
+                    </span>
+                  </div>
+                  {!percentageValid && (
+                    <button
+                      type="button"
+                      className="text-xs text-lime-400/70 hover:text-lime-400 transition-colors"
+                      onClick={() => {
+                        const share = (100 / participantIds.length).toFixed(1)
+                        setPercentages(prev => ({ ...prev, ...Object.fromEntries(participantIds.map(id => [String(id), share])) }))
+                      }}
+                    >
+                      Fill equal percentages
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* Exact amounts: one dollar input per participant */}
+              {splitMode === 'exact' && (
+                <div className="space-y-2">
+                  {participantIds.map(id => {
+                    const member = members.find(m => m.id === id)
+                    if (!member) return null
+                    return (
+                      <div key={id} className="flex items-center gap-3">
+                        <span className="text-sm text-ink-300 w-24 truncate flex-shrink-0">{member.name}</span>
+                        <div className="relative flex-1">
+                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-400 text-xs">{sym}</span>
+                          <input
+                            type="number" min="0" step="0.01" placeholder="0.00"
+                            className="input w-full text-sm pl-7"
+                            value={exactAmounts[String(id)] ?? ''}
+                            onChange={(e) => setExactAmounts(prev => ({ ...prev, [String(id)]: e.target.value }))}
+                          />
+                        </div>
+                      </div>
+                    )
+                  })}
+                  {/* Running total vs expected */}
+                  <div className={clsx(
+                    'flex items-center justify-between text-xs px-2 py-1.5 rounded-lg border',
+                    exactValid
+                      ? 'bg-lime-400/5 border-lime-400/20 text-lime-400'
+                      : 'bg-red-400/5 border-red-400/20 text-red-400'
+                  )}>
+                    <span>Total assigned</span>
+                    <span className="font-mono font-semibold">
+                      {sym}{exactTotal.toFixed(2)} / {sym}{expenseAmount.toFixed(2)}
+                      {' — '}{exactValid ? 'perfect!' : `${sym}${Math.abs(expenseAmount - exactTotal).toFixed(2)} ${exactTotal < expenseAmount ? 'remaining' : 'over'}`}
+                    </span>
+                  </div>
+                  {!exactValid && expenseAmount > 0 && (
+                    <button
+                      type="button"
+                      className="text-xs text-lime-400/70 hover:text-lime-400 transition-colors"
+                      onClick={() => {
+                        const share = (expenseAmount / participantIds.length).toFixed(2)
+                        setExactAmounts(prev => ({ ...prev, ...Object.fromEntries(participantIds.map(id => [String(id), share])) }))
+                      }}
+                    >
+                      Fill equal amounts
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {error && <p className="text-xs text-red-400">{error}</p>}
         </div>
@@ -1369,6 +1555,26 @@ export default function TransactionsPage() {
           />
         </div>
       </div>
+
+      {/* ── "Needs Review" helper tip ────────────────────────────────────────
+          Only shown when on the needs-review filter with items present and
+          nothing selected yet. Teaches the batch workflow so users don't
+          have to click into each transaction individually.
+      ─────────────────────────────────────────────────────────────────────── */}
+      {filter === 'needs-review' && filtered.length > 0 && selectedIds.size === 0 && (
+        <div className="flex items-center gap-2.5 mb-3 px-3 py-2.5 rounded-lg bg-amber-400/5 border border-amber-400/20 animate-slide-up">
+          <AlertTriangle size={13} className="text-amber-400 flex-shrink-0" />
+          <p className="text-xs text-ink-300">
+            These transactions need a participant assignment.{' '}
+            <span className="text-amber-400 font-medium">
+              Check the box in the table header to select all
+            </span>
+            , then use{' '}
+            <span className="text-amber-400 font-medium">Set Participants</span>
+            {' '}to resolve them all in one go.
+          </p>
+        </div>
+      )}
 
       {/* ── Bulk action toolbar (visible when anything is selected) ────────── */}
       {selectedIds.size > 0 && (

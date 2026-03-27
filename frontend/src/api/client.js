@@ -6,16 +6,32 @@
  *
  * The Vite proxy forwards /api/* requests to http://localhost:8000/api/*
  * so we don't need to hardcode the backend URL here.
+ *
+ * AUTH: Every request automatically includes the Supabase JWT token in an
+ * Authorization header. The backend validates this to identify who is calling.
  */
+import { supabase } from '../lib/supabase'
 
 // In development, Vite proxies /api → localhost:8001 (see vite.config.js).
 // In production (Vercel), the vercel.json rewrites handle routing /api → Railway.
 // We keep BASE as '/api' so both environments work without any code changes.
 const BASE = '/api'
 
+/**
+ * Get the Authorization header with the current user's JWT.
+ * If the user is not signed in, returns an empty object (the backend will 401).
+ * Supabase refreshes expired tokens automatically — this always gets the latest.
+ */
+async function getAuthHeader() {
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session?.access_token) return {}
+  return { 'Authorization': `Bearer ${session.access_token}` }
+}
+
 async function request(path, options = {}) {
+  const authHeader = await getAuthHeader()
   const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...options.headers },
+    headers: { 'Content-Type': 'application/json', ...authHeader, ...options.headers },
     ...options,
   })
 
@@ -68,8 +84,12 @@ export const api = {
     form.append('statement_currency', statementCurrency)
     if (exchangeRate) form.append('exchange_rate', exchangeRate)
 
+    const authHeader = await getAuthHeader()
     const res = await fetch(`${BASE}/groups/${groupId}/statements/upload`, {
       method: 'POST',
+      // IMPORTANT: Do NOT set Content-Type here — the browser sets it automatically
+      // for FormData including the correct boundary string. Setting it manually breaks uploads.
+      headers: authHeader,
       body: form,
     })
     if (!res.ok) {
@@ -88,8 +108,10 @@ export const api = {
     form.append('statement_currency', statementCurrency)
     if (exchangeRate) form.append('exchange_rate', exchangeRate)
 
+    const authHeader = await getAuthHeader()
     const res = await fetch(`${BASE}/groups/${groupId}/statements/upload-csv`, {
       method: 'POST',
+      headers: authHeader,  // same note: no Content-Type for FormData
       body: form,
     })
     if (!res.ok) {
@@ -158,7 +180,10 @@ export const api = {
   // Export all transactions (date, merchant, category, amount, participants, status)
   // as a CSV you can open in Google Sheets or Excel — no settlement computation needed.
   exportTransactionsCSV: async (groupId, groupName) => {
-    const res = await fetch(`${BASE}/groups/${groupId}/transactions/export-csv`)
+    const authHeader = await getAuthHeader()
+    const res = await fetch(`${BASE}/groups/${groupId}/transactions/export-csv`, {
+      headers: authHeader,
+    })
     const blob = await res.blob()
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -170,9 +195,10 @@ export const api = {
   },
 
   exportCSV: async (groupId, payerMemberId, statementId = null) => {
+    const authHeader = await getAuthHeader()
     const res = await fetch(`${BASE}/groups/${groupId}/settlement/export-csv`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeader },
       body: JSON.stringify({ payer_member_id: payerMemberId, statement_id: statementId }),
     })
     const blob = await res.blob()
@@ -184,10 +210,35 @@ export const api = {
     URL.revokeObjectURL(url)
   },
 
+  // ── Trip Share ───────────────────────────────────────────────────────────
+  // Create (or return existing) share link for a trip.
+  // payerMemberId: the member currently selected as the payer on the settlement page.
+  // Returns { share_code, share_url, created_at, view_count }
+  createShare: (groupId, payerMemberId) =>
+    request(`/groups/${groupId}/share`, {
+      method: 'POST',
+      body: JSON.stringify({ payer_member_id: payerMemberId }),
+    }),
+
+  // Remove the share link — link immediately stops working for anyone who has it.
+  revokeShare: (groupId) => request(`/groups/${groupId}/share`, { method: 'DELETE' }),
+
+  // Fetch the public trip view — NO auth required.
+  // This is what visitors see when they open a share link.
+  getPublicShare: (shareCode) => request(`/share/${shareCode}`),
+
+  // Submit in-app feedback
+  submitFeedback: (feedbackType, message, email = null, page = null) =>
+    request('/feedback', {
+      method: 'POST',
+      body: JSON.stringify({ feedback_type: feedbackType, message, email, page }),
+    }),
+
   exportJSON: async (groupId, payerMemberId, statementId = null) => {
+    const authHeader = await getAuthHeader()
     const res = await fetch(`${BASE}/groups/${groupId}/settlement/export-json`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeader },
       body: JSON.stringify({ payer_member_id: payerMemberId, statement_id: statementId }),
     })
     const blob = await res.blob()

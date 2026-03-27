@@ -30,6 +30,9 @@ class Group(Base):
     # The currency all expenses are settled in (e.g. "USD", "JPY").
     # Foreign currency expenses get converted to this before settlement.
     base_currency = Column(String, default="USD", nullable=False, server_default="USD")
+    # The Supabase user UUID who owns this trip. Nullable for backward compatibility
+    # with locally-created groups that predate the cloud migration.
+    owner_id = Column(String, nullable=True, index=True)
 
     # One group → many members/statements/rules
     members = relationship("Member", back_populates="group", cascade="all, delete-orphan")
@@ -158,3 +161,56 @@ class MerchantRule(Base):
     __table_args__ = (
         UniqueConstraint('group_id', 'merchant_key', name='uq_merchant_rule'),
     )
+
+
+class TripShare(Base):
+    """
+    A shareable read-only link for a trip's settlement summary.
+
+    When a trip owner wants to show their friends how the expenses were split,
+    they create a share link. Anyone with the link can view the settlement
+    without signing up — this is the app's viral loop.
+
+    share_code:       A random UUID used in the URL: /share/abc123
+    group_id:         Which trip this share points to
+    created_by:       Supabase user UUID of who created the share
+    payer_member_id:  The reference payer used for settlement computation
+                      (captured at share creation time from the settlement page)
+    view_count:       How many times the share link has been viewed (analytics)
+    """
+    __tablename__ = "trip_shares"
+
+    id = Column(Integer, primary_key=True, index=True)
+    # The URL-safe random code used in the share link (e.g. "a8f3c2d1-...")
+    share_code = Column(String, unique=True, nullable=False, index=True)
+    group_id = Column(Integer, ForeignKey("groups.id"), nullable=False)
+    # Who created the share (must be the trip owner)
+    created_by = Column(String, nullable=False)
+    # Which member is the reference payer for settlement computation
+    # (saved at share creation so the link always shows a valid settlement)
+    payer_member_id = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    # Track how many times this link has been viewed — useful for growth analytics
+    view_count = Column(Integer, default=0, nullable=False, server_default="0")
+
+    group = relationship("Group")
+
+
+class Feedback(Base):
+    """
+    User feedback submitted through the in-app feedback widget.
+
+    Collected during early rollout to help iterate on the product.
+    Stored locally — no external service needed.
+    """
+    __tablename__ = "feedback"
+
+    id = Column(Integer, primary_key=True, index=True)
+    # Type lets us triage quickly: bug reports vs feature requests vs general
+    feedback_type = Column(String, nullable=False)   # "bug" | "feature" | "other"
+    message = Column(Text, nullable=False)
+    # Optional — user can leave their email if they want a follow-up
+    email = Column(String, nullable=True)
+    # Which page they were on — helps us understand context
+    page = Column(String, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

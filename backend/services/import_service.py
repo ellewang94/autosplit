@@ -11,13 +11,46 @@ Keeping this separate from the API routes means we can test it without HTTP.
 """
 
 import hashlib
+import io
 from sqlalchemy.orm import Session
 from typing import Optional
 
+import pdfplumber
+
 from models.models import Statement, Transaction, MerchantRule, Member, Group
 from adapters.chase_parser import parse_chase_pdf, ParsedStatement
+from adapters.amex_parser import parse_amex_pdf
+from adapters.bofa_parser import parse_bofa_pdf
+from adapters.universal_parser import parse_universal_pdf
 from adapters.csv_parser import parse_bank_csv
 from domain.categories import categorize, suggest_participants, normalize_merchant_key
+
+
+def _detect_pdf_bank(file_bytes: bytes) -> str:
+    """
+    Peek at the first page of a PDF to figure out which bank issued it.
+
+    Returns one of: "amex", "bofa", "chase", or "unknown".
+    "unknown" triggers the universal parser as a catch-all fallback.
+
+    We check for distinctive phrases that appear on the first page of each
+    bank's statements — these are reliable identifiers that won't change often.
+    """
+    try:
+        with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+            first_page_text = (pdf.pages[0].extract_text() or "").lower()
+    except Exception:
+        return "unknown"
+
+    if "american express" in first_page_text or "americanexpress.com" in first_page_text:
+        return "amex"
+    elif "bank of america" in first_page_text or "bankofamerica.com" in first_page_text:
+        return "bofa"
+    elif "jpmorgan chase" in first_page_text or "chase.com" in first_page_text or "jpmorganchase" in first_page_text:
+        return "chase"
+    else:
+        # Unknown bank — use the universal heuristic parser
+        return "unknown"
 
 
 def _save_parsed_statement(
@@ -121,6 +154,24 @@ def _save_parsed_statement(
             txn_original_amount = parsed_txn.amount           # keep the CAD/JPY/etc amount
             txn_amount = round(parsed_txn.amount * exchange_rate, 2)  # convert to base
 
+        # ── Auto-confirm logic ─────────────────────────────────────────────────
+        # If we're ≥90% confident about the category AND the transaction is
+        # assigned to all members (no ambiguity about who splits it), there's
+        # nothing for the user to review — we mark it "confirmed" immediately.
+        #
+        # Only transactions that are genuinely ambiguous — "ask" type (shopping,
+        # unknown) or "single" type without a named person — stay "unreviewed"
+        # and show up in the "Needs Review" queue.
+        #
+        # This dramatically reduces review friction: a typical dining-heavy
+        # trip statement (Starbucks, Uber Eats, restaurants) will come in
+        # almost fully confirmed, with only edge cases needing attention.
+        auto_confirmed = (
+            overall_confidence >= 0.9
+            and participants.get("type") == "all"
+        )
+        txn_status = "confirmed" if auto_confirmed else "unreviewed"
+
         txn = Transaction(
             statement_id=stmt.id,
             posted_date=parsed_txn.posted_date,
@@ -134,7 +185,7 @@ def _save_parsed_statement(
             overrides_json={},
             parse_confidence=overall_confidence,
             txn_hash=parsed_txn.txn_hash,
-            status="unreviewed",
+            status=txn_status,
             currency=txn_currency,
             original_amount=txn_original_amount,
         )
@@ -178,12 +229,28 @@ def import_statement(
     exchange_rate: Optional[float] = None,
 ) -> dict:
     """
-    Parse a Chase PDF, apply merchant rules + auto-categorization, and save to DB.
+    Parse a bank PDF statement, auto-detect the bank, and save to DB.
+
+    Supported banks: Chase, American Express, Bank of America.
+    The bank is detected automatically from the PDF text — no need to tell us.
 
     Idempotent — re-uploading the same file returns the existing data.
     """
     file_hash = hashlib.sha256(file_bytes).hexdigest()
-    parsed = parse_chase_pdf(file_bytes)
+
+    # Auto-detect which bank's parser to use based on the PDF content.
+    # Falls back to the universal heuristic parser for any unrecognized bank
+    # (Citi, Capital One, Wells Fargo, Discover, US Bank, etc.)
+    bank = _detect_pdf_bank(file_bytes)
+    if bank == "amex":
+        parsed = parse_amex_pdf(file_bytes)
+    elif bank == "bofa":
+        parsed = parse_bofa_pdf(file_bytes)
+    elif bank == "chase":
+        parsed = parse_chase_pdf(file_bytes)
+    else:
+        parsed = parse_universal_pdf(file_bytes)
+
     return _save_parsed_statement(
         group_id=group_id,
         file_hash=file_hash,

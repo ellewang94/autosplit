@@ -115,7 +115,7 @@
     @apply w-full border-collapse;
   }
   .data-table th {
-    @apply px-3 py-2.5 text-left text-xs font-medium text-ink-400 uppercase tracking-widest
+    @apply px-3 py-2.5 text-left text-xs font-medium text-ink-300 uppercase tracking-widest
            border-b border-ink-700 bg-ink-900;
   }
   .data-table td {

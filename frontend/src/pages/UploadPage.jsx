@@ -12,6 +12,22 @@ import clsx from 'clsx'
 // ── Supported currencies (same list as TransactionsPage) ─────────────────────
 const CURRENCIES = ['USD', 'AUD', 'NZD', 'JPY', 'GBP', 'EUR', 'CAD', 'SGD', 'HKD', 'THB']
 
+// ── Banks that support PDF upload ─────────────────────────────────────────────
+const PDF_BANKS = [
+  {
+    name: 'Chase',
+    steps: 'Log in → Accounts → Statements → View/Download PDF',
+  },
+  {
+    name: 'American Express',
+    steps: 'Log in → Statements & Activity → View Statement → Download PDF',
+  },
+  {
+    name: 'Bank of America',
+    steps: 'Log in → Accounts → Statements → View Statement → Download PDF',
+  },
+]
+
 // ── Banks that support CSV export, with where to find it ─────────────────────
 const CSV_BANKS = [
   {
@@ -117,8 +133,8 @@ function FilePreview({ file }) {
   )
 }
 
-// ── CSV bank instructions accordion ──────────────────────────────────────────
-function BankInstructions() {
+// ── Bank instructions accordion (reused for both PDF and CSV modes) ───────────
+function BankInstructions({ banks, title }) {
   const [open, setOpen] = useState(false)
   return (
     <div className="rounded-lg border border-ink-700 overflow-hidden">
@@ -128,7 +144,7 @@ function BankInstructions() {
       >
         <span className="text-xs font-medium text-ink-300 flex items-center gap-2">
           <Info size={12} className="text-ink-500" />
-          How to export CSV from your bank
+          {title}
         </span>
         {open
           ? <ChevronUp size={13} className="text-ink-500" />
@@ -137,7 +153,7 @@ function BankInstructions() {
       </button>
       {open && (
         <div className="divide-y divide-ink-800">
-          {CSV_BANKS.map((bank) => (
+          {banks.map((bank) => (
             <div key={bank.name} className="px-4 py-2.5 bg-ink-900/50">
               <p className="text-xs font-semibold text-ink-200 mb-0.5">{bank.name}</p>
               <p className="text-xs text-ink-500 font-mono">{bank.steps}</p>
@@ -341,7 +357,7 @@ export default function UploadPage() {
           <label className="label mb-3">What type of file are you uploading?</label>
           <div className="grid grid-cols-2 gap-3">
 
-            {/* Chase PDF option */}
+            {/* Bank PDF option */}
             <button
               className={clsx(
                 'flex flex-col items-start gap-2 p-4 rounded-xl border-2 text-left transition-all',
@@ -354,13 +370,13 @@ export default function UploadPage() {
               <div className="flex items-center gap-2">
                 <FileText size={18} className={mode === 'pdf' ? 'text-lime-400' : 'text-ink-400'} />
                 <span className={clsx('font-semibold text-sm', mode === 'pdf' ? 'text-lime-400' : 'text-ink-200')}>
-                  Chase PDF
+                  Bank PDF
                 </span>
               </div>
               <p className="text-xs text-ink-500 leading-relaxed">
-                The monthly statement PDF from Chase's "Statements" section. Drag and drop — no export needed.
+                Your monthly statement PDF downloaded from your bank's website. Bank is auto-detected.
               </p>
-              <span className="text-[10px] font-mono text-ink-600">Chase credit cards only</span>
+              <span className="text-[10px] font-mono text-ink-600">Chase · Amex · Bank of America</span>
             </button>
 
             {/* Bank CSV option */}
@@ -389,17 +405,13 @@ export default function UploadPage() {
 
           {/* Contextual help shown after mode is chosen */}
           {mode === 'pdf' && (
-            <div className="mt-4 flex items-start gap-2 px-3 py-2.5 rounded-lg bg-ink-800/60 border border-ink-700 animate-slide-up">
-              <Info size={12} className="text-ink-500 flex-shrink-0 mt-0.5" />
-              <p className="text-xs text-ink-400">
-                On Chase.com: <span className="text-ink-300 font-mono">Account → Statements → View Statement → Download PDF</span>.
-                The PDF must be from Chase credit cards — debit or other banks won't work.
-              </p>
+            <div className="mt-4 animate-slide-up">
+              <BankInstructions banks={PDF_BANKS} title="How to download your statement PDF" />
             </div>
           )}
           {mode === 'csv' && (
             <div className="mt-4 animate-slide-up">
-              <BankInstructions />
+              <BankInstructions banks={CSV_BANKS} title="How to export CSV from your bank" />
             </div>
           )}
         </div>
@@ -478,7 +490,7 @@ export default function UploadPage() {
       {mode && !result && (
         <div className="card mb-4">
           <label className="label">
-            {mode === 'pdf' ? 'Chase Statement PDF' : 'Bank Transaction CSV'}
+            {mode === 'pdf' ? 'Bank Statement PDF' : 'Bank Transaction CSV'}
           </label>
           {file ? (
             <div className="space-y-3">
@@ -492,9 +504,9 @@ export default function UploadPage() {
               onFile={setFile}
               disabled={upload.isPending}
               accept=".pdf"
-              label="Drop your Chase PDF here"
-              sublabel="or click to browse · one statement at a time"
-              mono="PDF only · Chase credit card statements"
+              label="Drop your statement PDF here"
+              sublabel="or click to browse · bank is detected automatically"
+              mono="PDF only · Chase · Amex · Bank of America"
             />
           ) : (
             <DropZone

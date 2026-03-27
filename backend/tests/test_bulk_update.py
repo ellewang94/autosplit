@@ -231,9 +231,10 @@ class TestBulkSecurityCheck:
                 "category": "hacked",
             },
         )
-        # Returns 200 but updates 0 — the transactions don't belong to that group
-        assert resp.status_code == 200
-        assert resp.json()["updated"] == 0
+        # After auth was added, _require_group returns 404 for non-existent groups.
+        # This is stricter than the old behavior (which returned 200 + 0 updates)
+        # but is the correct, safe behavior — don't reveal that the group doesn't exist.
+        assert resp.status_code == 404
 
         # The actual transactions in the correct group should be unchanged
         db = TestSessionLocal()
