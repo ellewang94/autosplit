@@ -23,6 +23,7 @@ class MemberResponse(BaseModel):
     id: int
     group_id: int
     name: str
+    has_account: bool = False   # True once this member claims their account via invite link
 
 
 # ─── Groups ───────────────────────────────────────────────────────────────────
@@ -44,6 +45,7 @@ class GroupResponse(BaseModel):
     members: List[MemberResponse] = []
     # Return the group's settlement currency to the frontend
     base_currency: str = "USD"
+    owner_id: Optional[str] = None   # Supabase UUID of the trip creator
 
 
 # ─── Statements ───────────────────────────────────────────────────────────────
@@ -253,6 +255,31 @@ class PublicTripView(BaseModel):
     transfers: List[PublicTransfer]
     transaction_count: int   # Total number of transactions in the trip
     view_count: int          # How many times this share has been viewed
+
+
+# ─── Trip Invites ──────────────────────────────────────────────────────────────
+
+class InvitePreview(BaseModel):
+    """Public preview of a trip shown on the join page — no auth required to view."""
+    trip_name: str
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    member_count: int
+    # Members who haven't claimed a user account yet — shown as claimable options
+    unclaimed_members: List[dict]   # [{"id": 1, "name": "Anthony"}, ...]
+    invite_code: str
+
+class JoinTripRequest(BaseModel):
+    """Request body when someone joins a trip via invite link."""
+    member_id: Optional[int] = None   # claim an existing unclaimed member slot
+    name: Optional[str] = None        # join as a brand-new member (if no existing slot to claim)
+
+class JoinTripResponse(BaseModel):
+    """Returned after successfully joining a trip."""
+    group_id: int
+    group_name: str
+    member_id: int
+    member_name: str
 
 
 # ─── Feedback ──────────────────────────────────────────────────────────────────

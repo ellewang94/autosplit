@@ -28,6 +28,7 @@ from schemas.schemas import (
     ManualTransactionCreate, ManualTransactionResponse,
     FeedbackCreate, FeedbackResponse,
     TripShareCreate, TripShareResponse, PublicTripView, PublicMember, PublicTransfer,
+    InvitePreview, JoinTripRequest, JoinTripResponse,
 )
 from services.import_service import import_statement, import_csv_statement, save_merchant_rule, create_manual_transaction
 from services.settlement_service import (
@@ -38,19 +39,33 @@ from auth import get_current_user_id
 router = APIRouter()
 
 
-# ── Helper: verify the user owns a group ─────────────────────────────────────
+# ── Helper: verify the user can access a group ───────────────────────────────
 # Every route that touches a specific group calls this first. If the group
 # doesn't exist OR belongs to a different user, we return 404 (not 403 —
 # we don't want to confirm to an attacker that a group ID exists).
 def _require_group(group_id: int, user_id: str, db: Session) -> Group:
-    group = db.query(Group).filter(
-        Group.id == group_id,
-        # Allow access if owner_id matches OR if owner_id is null (legacy local groups)
-        (Group.owner_id == user_id) | (Group.owner_id == None)  # noqa: E711
-    ).first()
+    """
+    Verify the user can access this group — either as the owner OR as a joined member.
+    Returns 404 for both "doesn't exist" and "no access" (don't leak group IDs to attackers).
+    """
+    group = db.query(Group).filter_by(id=group_id).first()
     if not group:
         raise HTTPException(status_code=404, detail="Trip not found")
-    return group
+
+    # Legacy groups (no owner_id) are accessible to anyone signed in — backward compat
+    if group.owner_id is None:
+        return group
+
+    # Trip owner always has full access
+    if group.owner_id == user_id:
+        return group
+
+    # Joined members also have access (they claimed a member slot via invite link)
+    is_member = db.query(Member).filter_by(group_id=group_id, user_id=user_id).first()
+    if is_member:
+        return group
+
+    raise HTTPException(status_code=404, detail="Trip not found")
 
 
 def _require_statement(statement_id: int, user_id: str, db: Session) -> Statement:
@@ -89,11 +104,20 @@ def list_groups(
     user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    """Return all groups belonging to the signed-in user."""
-    # Filter to only this user's groups (OR legacy groups with no owner)
-    return db.query(Group).filter(
+    """Return all groups the signed-in user can access: owned + joined as member."""
+    # Groups this user owns (or legacy groups with no owner)
+    owned = db.query(Group).filter(
         (Group.owner_id == user_id) | (Group.owner_id == None)  # noqa: E711
     ).all()
+    owned_ids = {g.id for g in owned}
+
+    # Groups this user has joined as a member (via invite link)
+    member_records = db.query(Member).filter(Member.user_id == user_id).all()
+    joined_ids = {m.group_id for m in member_records} - owned_ids
+
+    joined = db.query(Group).filter(Group.id.in_(joined_ids)).all() if joined_ids else []
+
+    return owned + joined
 
 
 @router.post("/groups", response_model=GroupResponse)
@@ -1002,6 +1026,140 @@ def get_public_share(
         transfers=public_transfers,
         transaction_count=txn_count,
         view_count=share.view_count or 0,
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TRIP INVITES  (the collaborative workflow — let friends join and contribute)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/groups/{group_id}/invite-link")
+def get_or_create_invite_link(
+    group_id: int,
+    request: Request,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """
+    Get (or create) the invite link for a trip.
+
+    Only the trip owner can call this — trip members can't hand out invite links
+    without the owner's knowledge. If no invite_code exists yet, one is generated.
+
+    Returns: { invite_url: "https://autosplit.co/join/<uuid>" }
+    """
+    group = _require_group(group_id, user_id, db)
+
+    # Only the owner can generate invite links — not joined members
+    if group.owner_id and group.owner_id != user_id:
+        raise HTTPException(status_code=403, detail="Only the trip owner can manage invite links.")
+
+    # Generate invite_code on first call
+    if not group.invite_code:
+        group.invite_code = str(_uuid_module.uuid4())
+        db.commit()
+        db.refresh(group)
+
+    # Build the full invite URL from FRONTEND_URL env var (matches how share links work)
+    frontend_url = os.getenv("FRONTEND_URL", str(request.base_url).rstrip("/"))
+    invite_url = f"{frontend_url}/join/{group.invite_code}"
+
+    return {"invite_code": group.invite_code, "invite_url": invite_url}
+
+
+@router.get("/invite/{invite_code}", response_model=InvitePreview)
+def get_invite_preview(
+    invite_code: str,
+    db: Session = Depends(get_db),
+):
+    """
+    Public endpoint — NO auth required.
+
+    Returns enough information to show a "You've been invited to X" preview page.
+    Only returns unclaimed member slots (ones not yet linked to a user account)
+    so the joiner can pick "I'm Anthony" from a dropdown.
+    """
+    group = db.query(Group).filter_by(invite_code=invite_code).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Invite link not found or expired.")
+
+    members = db.query(Member).filter_by(group_id=group.id).all()
+
+    # Only show unclaimed slots (members who haven't joined AutoSplit yet)
+    unclaimed = [
+        {"id": m.id, "name": m.name}
+        for m in members
+        if not m.user_id
+    ]
+
+    return InvitePreview(
+        trip_name=group.name,
+        start_date=group.start_date,
+        end_date=group.end_date,
+        member_count=len(members),
+        unclaimed_members=unclaimed,
+        invite_code=invite_code,
+    )
+
+
+@router.post("/invite/{invite_code}/join", response_model=JoinTripResponse)
+def join_trip(
+    invite_code: str,
+    body: JoinTripRequest,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """
+    Auth required. Join a trip via invite link.
+
+    Two ways to join:
+    1. Claim an existing member slot: body = { member_id: 3 }
+       — Links this user's account to the existing "Anthony" member row.
+    2. Add yourself as a new member: body = { name: "Anthony" }
+       — Creates a new member row and links it to this user.
+
+    Idempotent: if you're already a member, returns your existing record.
+    """
+    group = db.query(Group).filter_by(invite_code=invite_code).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Invite link not found or expired.")
+
+    # Idempotent: already a member — just return their info
+    existing = db.query(Member).filter_by(group_id=group.id, user_id=user_id).first()
+    if existing:
+        return JoinTripResponse(
+            group_id=group.id,
+            group_name=group.name,
+            member_id=existing.id,
+            member_name=existing.name,
+        )
+
+    if body.member_id:
+        # Claiming an existing slot — verify it exists and isn't taken
+        member = db.query(Member).filter_by(id=body.member_id, group_id=group.id).first()
+        if not member:
+            raise HTTPException(status_code=400, detail="That member wasn't found in this trip.")
+        if member.user_id and member.user_id != user_id:
+            raise HTTPException(status_code=400, detail="That member slot is already claimed by someone else.")
+        member.user_id = user_id
+        db.commit()
+        db.refresh(member)
+
+    elif body.name and body.name.strip():
+        # Adding themselves as a new member
+        member = Member(group_id=group.id, name=body.name.strip(), user_id=user_id)
+        db.add(member)
+        db.commit()
+        db.refresh(member)
+
+    else:
+        raise HTTPException(status_code=400, detail="Provide either member_id (to claim a slot) or name (to join as new member).")
+
+    return JoinTripResponse(
+        group_id=group.id,
+        group_name=group.name,
+        member_id=member.id,
+        member_name=member.name,
     )
 
 

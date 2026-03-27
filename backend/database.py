@@ -86,6 +86,10 @@ def run_migrations():
             ("groups", "base_currency", "VARCHAR DEFAULT 'USD' NOT NULL"),
             # Groups table — cloud auth: which user owns this trip
             ("groups", "owner_id", "VARCHAR"),  # Supabase UUID; nullable for legacy local groups
+            # Groups table — invite link token for collaborative access
+            ("groups",  "invite_code", "VARCHAR UNIQUE"),
+            # Members table — links a member slot to a specific AutoSplit user account
+            ("members", "user_id",     "VARCHAR"),
             # Transactions table — multi-currency support
             ("transactions", "currency",         "VARCHAR DEFAULT 'USD' NOT NULL"),
             ("transactions", "original_amount",  "FLOAT"),  # nullable, null = same as base

@@ -33,6 +33,9 @@ class Group(Base):
     # The Supabase user UUID who owns this trip. Nullable for backward compatibility
     # with locally-created groups that predate the cloud migration.
     owner_id = Column(String, nullable=True, index=True)
+    # Invite link token — anyone with this URL can join as a collaborator.
+    # Generated on demand, revocable by regenerating. Separate from share_code.
+    invite_code = Column(String, nullable=True, unique=True, index=True)
 
     # One group → many members/statements/rules
     members = relationship("Member", back_populates="group", cascade="all, delete-orphan")
@@ -50,6 +53,14 @@ class Member(Base):
     id = Column(Integer, primary_key=True, index=True)
     group_id = Column(Integer, ForeignKey("groups.id"), nullable=False)
     name = Column(String, nullable=False)
+    # Supabase user UUID — set when a user claims this member slot via an invite link.
+    # Null = this member hasn't joined AutoSplit yet (they're just a name in the trip).
+    user_id = Column(String, nullable=True, index=True)
+
+    @property
+    def has_account(self) -> bool:
+        """True if this member has linked their AutoSplit account."""
+        return self.user_id is not None
 
     group = relationship("Group", back_populates="members")
 
