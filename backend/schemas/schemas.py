@@ -255,6 +255,10 @@ class PublicTripView(BaseModel):
     transfers: List[PublicTransfer]
     transaction_count: int   # Total number of transactions in the trip
     view_count: int          # How many times this share has been viewed
+    # Spending totals by category — lets recipients see *what* the $180 covers
+    # without exposing individual merchant names (privacy).
+    # e.g. {"dining": 145.50, "transport": 87.20, "accommodation": 210.00}
+    spending_by_category: dict = {}
 
 
 # ─── Trip Invites ──────────────────────────────────────────────────────────────

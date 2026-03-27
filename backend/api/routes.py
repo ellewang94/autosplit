@@ -987,15 +987,28 @@ def get_public_share(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    # Count total transactions in the trip (for context — "split 47 transactions")
+    # Count total transactions and compute category-level spending totals.
+    # We expose categories (dining, transport, etc.) but NOT merchant names — privacy.
     stmt_ids = [s.id for s in db.query(Statement).filter_by(group_id=share.group_id).all()]
+    txn_count = 0
+    spending_by_category: dict = {}
+
     if stmt_ids:
-        txn_count = db.query(Transaction).filter(
+        active_txns = db.query(Transaction).filter(
             Transaction.statement_id.in_(stmt_ids),
             Transaction.status != "excluded",
-        ).count()
-    else:
-        txn_count = 0
+        ).all()
+
+        txn_count = len(active_txns)
+
+        # Sum amounts by category (only shared transactions, not personal ones)
+        for txn in active_txns:
+            if txn.is_personal:
+                continue
+            cat = txn.category or "other"
+            spending_by_category[cat] = round(
+                spending_by_category.get(cat, 0.0) + txn.amount, 2
+            )
 
     # Increment view count (fire-and-forget — if this fails, don't crash the page)
     try:
@@ -1026,6 +1039,7 @@ def get_public_share(
         transfers=public_transfers,
         transaction_count=txn_count,
         view_count=share.view_count or 0,
+        spending_by_category=spending_by_category,
     )
 
 
