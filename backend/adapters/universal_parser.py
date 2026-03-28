@@ -87,6 +87,18 @@ PATTERN_ISO = re.compile(
     r'\$?([\d,]+\.\d{2})\s*$'
 )
 
+# Capital One two-date format: "Oct 15 Oct 17 MERCHANT NAME $6.34"
+# Capital One (and some other banks) prints both a transaction date and a post date
+# on every line. We use the POST date (second date) as it's what the bank charges on.
+# Payment lines look like "Oct 13 Oct 13 CAPITAL ONE AUTOPAY PYMT - $500.00" —
+# the minus before the amount identifies them; we skip those (not purchases).
+PATTERN_TWO_DATE = re.compile(
+    r'^[A-Za-z]{3}\s+\d{1,2}\s+'           # Trans date (ignored — we use post date)
+    r'([A-Za-z]{3})\s+(\d{1,2})\s+'        # Post date: month name + day
+    r'(.+?)\s+'                              # Merchant description
+    r'(?<!\-)\$?([\d,]+\.\d{2})\s*$'       # Amount (no preceding minus = purchase)
+)
+
 # All patterns grouped with their date format strings
 # Each tuple: (compiled regex, strptime format, needs_year_inference)
 ALL_PATTERNS = [
@@ -95,6 +107,12 @@ ALL_PATTERNS = [
     (PATTERN_ISO,     "%Y-%m-%d", False),
     (PATTERN_NO_YEAR, None,       True),   # needs year inference
 ]
+
+# Month name → number map, used for Capital One two-date format parsing
+_MONTH_ABBR = {
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+    "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+}
 
 
 # ─── Skip Filters ─────────────────────────────────────────────────────────────
@@ -189,6 +207,26 @@ def _find_statement_period(text: str) -> Tuple[Optional[date], Optional[date]]:
         if d1 and d2:
             return d1, d2
 
+    # ── Pattern 5: Capital One / abbreviated-month format "Sep 19, 2025 - Oct 19, 2025"
+    # Both dates include the year. Uses 3-letter month abbreviations.
+    m = re.search(
+        r'([A-Za-z]{3,9})\s+(\d{1,2}),\s*(\d{4})\s*[-–]\s*([A-Za-z]{3,9})\s+(\d{1,2}),\s*(\d{4})',
+        text
+    )
+    if m:
+        # Try both full names (_MONTH_NAMES) and abbreviations (_MONTH_ABBR)
+        key1 = m.group(1).lower()
+        key2 = m.group(4).lower()
+        sm = _MONTH_NAMES.get(key1) or _MONTH_ABBR.get(key1[:3])
+        sd, sy = int(m.group(2)), int(m.group(3))
+        em = _MONTH_NAMES.get(key2) or _MONTH_ABBR.get(key2[:3])
+        ed, ey = int(m.group(5)), int(m.group(6))
+        if sm and em:
+            try:
+                return date(sy, sm, sd), date(ey, em, ed)
+            except ValueError:
+                pass
+
     return None, None
 
 
@@ -245,7 +283,10 @@ def parse_universal_pdf(file_bytes: bytes) -> ParsedStatement:
         if not stripped:
             continue
 
-        txn = _try_parse_line(stripped, period_start, period_end)
+        # Try Capital One two-date format first (more specific, must come before generic)
+        txn = _try_parse_two_date_line(stripped, period_start, period_end)
+        if not txn:
+            txn = _try_parse_line(stripped, period_start, period_end)
         if txn and txn.txn_hash not in seen_hashes:
             transactions.append(txn)
             seen_hashes.add(txn.txn_hash)
@@ -259,6 +300,70 @@ def parse_universal_pdf(file_bytes: bytes) -> ParsedStatement:
         period_end=period_end.isoformat(),
         transactions=transactions,
         raw_text=full_text,
+    )
+
+
+def _try_parse_two_date_line(
+    line: str,
+    period_start: date,
+    period_end: date,
+) -> Optional[ParsedTransaction]:
+    """
+    Parse Capital One (and similar) two-date format:
+      "Oct 15 Oct 17 THE HOME DEPOT #1704 KAILUA KONA HI $6.34"
+      trans_date  post_date  description  amount
+
+    We use the POST date for the transaction date (it's when the charge settled).
+    Payment lines (amount preceded by minus sign) are automatically skipped because
+    PATTERN_TWO_DATE only matches amounts NOT preceded by a minus.
+    """
+    m = PATTERN_TWO_DATE.match(line)
+    if not m:
+        return None
+
+    post_month_str = m.group(1).lower()[:3]  # "oct"
+    post_day       = int(m.group(2))          # 17
+    description    = m.group(3).strip()
+    amount_str     = m.group(4).replace(",", "")
+
+    # Skip header rows and non-transaction lines
+    if not description or len(description) < 3:
+        return None
+    if SKIP_DESCRIPTION.match(description):
+        return None
+    # Skip the column header line itself: "Trans Date Post Date Description Amount"
+    if re.search(r'\b(trans\s*date|post\s*date|description)\b', description, re.IGNORECASE):
+        return None
+    # Skip payment/credit lines — their description ends with " -" (Capital One style)
+    # e.g. "CAPITAL ONE AUTOPAY PYMT -" means the amount is a credit, not a charge
+    if description.rstrip().endswith(' -') or description.rstrip().endswith('-'):
+        return None
+
+    # Resolve month abbreviation to a number
+    post_month = _MONTH_ABBR.get(post_month_str)
+    if not post_month:
+        return None
+
+    try:
+        amount = float(amount_str)
+    except ValueError:
+        return None
+
+    if amount <= 0 or amount > MAX_REASONABLE_TRANSACTION:
+        return None
+
+    # Infer year using the statement period (same logic as MM/DD dates)
+    year = _infer_year(post_month, post_day, period_start, period_end)
+    full_date = f"{year}-{post_month:02d}-{post_day:02d}"
+    txn_hash = _make_txn_hash(full_date, description, amount)
+
+    return ParsedTransaction(
+        posted_date=full_date,
+        description_raw=description,
+        amount=amount,
+        txn_type="purchase",
+        parse_confidence=0.85,
+        txn_hash=txn_hash,
     )
 
 
