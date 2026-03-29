@@ -2,12 +2,91 @@ import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { api } from '../api/client'
+import { trackSettlementComputed, trackShareCreated } from '../lib/analytics'
 import {
   TrendingUp, ArrowRight, Download, Copy, CheckCircle,
   Users, DollarSign, AlertTriangle, ChevronDown, Loader,
   CreditCard, Check, ExternalLink, Link2, Link2Off, Eye,
+  ThumbsUp, ThumbsDown, Send,
 } from 'lucide-react'
 import clsx from 'clsx'
+
+// ── Feedback prompt shown after settlement is computed ────────────────────────
+// Shown at most once per settlement compute (local state, not persisted).
+// Asking "did this look right?" right after the eureka moment maximises response rate.
+function SettlementFeedback({ groupId }) {
+  const [vote, setVote] = useState(null)
+  const [comment, setComment] = useState('')
+  const [submitted, setSubmitted] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+
+  async function submit(selectedVote, extraComment = '') {
+    setSubmitting(true)
+    try {
+      await api.submitFeedback(
+        selectedVote === 'yes' ? 'feature' : 'bug',
+        selectedVote === 'yes'
+          ? 'Settlement: user confirmed the math looked correct.'
+          : `Settlement: user said the math looked wrong. ${extraComment ? 'Details: ' + extraComment : ''}`,
+        null,
+        `/groups/${groupId}/settlement`,
+      )
+    } catch (e) {
+      console.error('Feedback submit failed:', e)
+    }
+    setSubmitted(true)
+    setSubmitting(false)
+  }
+
+  if (submitted) {
+    return (
+      <div className="mt-6 flex items-center gap-2 text-xs text-ink-500 py-2">
+        <CheckCircle size={12} className="text-lime-400" />
+        Thanks — your feedback helps us improve!
+      </div>
+    )
+  }
+
+  return (
+    <div className="mt-6 pt-5 border-t border-ink-800">
+      {vote === null ? (
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-ink-500">Did the math look right?</span>
+          <button
+            onClick={() => { setVote('yes'); submit('yes') }}
+            className="flex items-center gap-1 text-xs text-ink-400 hover:text-lime-400 transition-colors"
+          >
+            <ThumbsUp size={13} /> Yes
+          </button>
+          <button
+            onClick={() => setVote('no')}
+            className="flex items-center gap-1 text-xs text-ink-400 hover:text-red-400 transition-colors"
+          >
+            <ThumbsDown size={13} /> Something looks off
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-2 animate-slide-up max-w-sm">
+          <p className="text-xs text-ink-400">What looked wrong? <span className="text-ink-600">(optional)</span></p>
+          <textarea
+            className="input w-full text-xs resize-none h-16"
+            placeholder="e.g. wrong amounts, someone missing, incorrect totals…"
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+          />
+          <button
+            onClick={() => submit('no', comment)}
+            disabled={submitting}
+            className="btn-secondary text-xs py-1.5"
+          >
+            <Send size={11} />
+            {submitting ? 'Sending…' : 'Send feedback'}
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
 
 /**
  * Format an ISO date string ("2026-01-05") into "Jan 5, 2026".
@@ -116,28 +195,84 @@ function BalanceCard({ balance, index, currency = 'USD' }) {
 }
 
 // ── Transfer card ─────────────────────────────────────────────────────────────
-function TransferCard({ transfer, index, currency = 'USD' }) {
+// groupId is needed to build a unique localStorage key per trip.
+// This prevents "paid" state from bleeding across different trips.
+function TransferCard({ transfer, index, currency = 'USD', groupId }) {
   const [expanded, setExpanded] = useState(false)
 
+  // Build a stable localStorage key for this specific transfer within this group.
+  // We use names + amount so the key is human-readable and unique within the group.
+  const paidKey = `autosplit_paid_${groupId}_${transfer.from_member_name}_${transfer.to_member_name}`
+
+  // Read initial paid state from localStorage so it survives page refresh.
+  const [paid, setPaid] = useState(() => localStorage.getItem(paidKey) === 'true')
+
+  function togglePaid() {
+    const next = !paid
+    setPaid(next)
+    // Persist to localStorage — 'true' string or remove the key
+    if (next) {
+      localStorage.setItem(paidKey, 'true')
+    } else {
+      localStorage.removeItem(paidKey)
+    }
+  }
+
   return (
-    <div className="card-sm animate-slide-up" style={{ animationDelay: `${index * 80}ms` }}>
+    <div
+      className={clsx(
+        'card-sm animate-slide-up transition-opacity',
+        paid && 'opacity-50'   // Fade out paid transfers — they're done
+      )}
+      style={{ animationDelay: `${index * 80}ms` }}
+    >
       <div className="flex items-center gap-3">
-        <div className="flex-1 flex items-center gap-2">
-          <span className="font-medium text-ink-100">{transfer.from_member_name}</span>
+        <div className="flex-1 flex items-center gap-2 min-w-0">
+          {/* Names — strikethrough when paid */}
+          <span className={clsx('font-medium text-ink-100 truncate', paid && 'line-through text-ink-500')}>
+            {transfer.from_member_name}
+          </span>
           <ArrowRight size={14} className="text-ink-500 flex-shrink-0" />
-          <span className="font-medium text-ink-100">{transfer.to_member_name}</span>
+          <span className={clsx('font-medium text-ink-100 truncate', paid && 'line-through text-ink-500')}>
+            {transfer.to_member_name}
+          </span>
         </div>
-        <div className="font-mono text-xl font-bold text-lime-400">
+
+        <div className={clsx('font-mono text-xl font-bold flex-shrink-0', paid ? 'text-ink-600 line-through' : 'text-lime-400')}>
           {formatAmount(transfer.amount, currency)}
         </div>
+
+        {/* Mark as paid toggle — the key organizer feature */}
         <button
-          className="btn-ghost py-1 px-2"
+          onClick={togglePaid}
+          title={paid ? 'Mark as unpaid' : 'Mark as paid'}
+          className={clsx(
+            'flex-shrink-0 w-7 h-7 rounded-full border-2 flex items-center justify-center transition-all',
+            paid
+              ? 'bg-green-400 border-green-400 text-ink-950'           // Filled green when paid
+              : 'bg-transparent border-ink-600 text-transparent hover:border-green-400'  // Empty circle when unpaid
+          )}
+        >
+          <Check size={12} strokeWidth={3} />
+        </button>
+
+        {/* Expand/collapse payment message */}
+        <button
+          className="btn-ghost py-1 px-2 flex-shrink-0"
           onClick={() => setExpanded(!expanded)}
           title="Payment request message"
         >
           <ChevronDown size={14} className={clsx('transition-transform', expanded && 'rotate-180')} />
         </button>
       </div>
+
+      {/* "Paid" label — shows when marked as paid */}
+      {paid && (
+        <div className="mt-2 flex items-center gap-1.5 text-xs text-green-400 font-medium">
+          <CheckCircle size={11} />
+          Marked as paid · <button onClick={togglePaid} className="underline hover:text-green-300 transition-colors">Undo</button>
+        </div>
+      )}
 
       {expanded && (
         <div className="mt-3 pt-3 border-t border-ink-700 animate-slide-up">
@@ -238,6 +373,8 @@ function SharePanel({ groupId, effectivePayerId }) {
     try {
       const result = await api.createShare(groupId, effectivePayerId)
       setShareUrl(result.share_url)
+      // Track the share creation — this is the key viral moment
+      trackShareCreated(groupId)
     } catch (e) {
       // Silently fail — share is non-critical
       console.error('Share failed:', e)
@@ -324,6 +461,9 @@ export default function SettlementPage() {
 
   const [settlement, setSettlement] = useState(null)
   const [error, setError] = useState(null)
+  // Snapshot how many transactions existed at the time of the last computation.
+  // If new transactions are added afterwards, we show a "stale" warning.
+  const [txnCountAtCompute, setTxnCountAtCompute] = useState(null)
 
   const { data: group } = useQuery({
     queryKey: ['group', groupId],
@@ -381,11 +521,26 @@ export default function SettlementPage() {
       effectivePayerId,
       statementId ? parseInt(statementId) : null
     ),
-    onSuccess: (data) => { setSettlement(data); setError(null) },
+    onSuccess: (data) => {
+      setSettlement(data)
+      setError(null)
+      // Snapshot the transaction count so we can warn if more are added later
+      setTxnCountAtCompute(allTransactions.length)
+      // Track the settlement compute event — useful for understanding usage depth
+      trackSettlementComputed({
+        memberCount: members.length,
+        transferCount: data.transfers?.length ?? 0,
+        totalAmount: data.transfers?.reduce((s, t) => s + t.amount, 0) ?? 0,
+      })
+    },
     onError: (err) => setError(err.message),
   })
 
   const totalOwed = settlement?.transfers.reduce((s, t) => s + t.amount, 0) || 0
+
+  // True when new transactions have been added after the last computation.
+  // This means the settlement results may no longer be accurate.
+  const settlementStale = settlement !== null && txnCountAtCompute !== null && allTransactions.length !== txnCountAtCompute
 
   return (
     <div className="max-w-3xl mx-auto">
@@ -522,6 +677,18 @@ export default function SettlementPage() {
         )}
       </div>
 
+      {/* ── Stale settlement warning ────────────────────────────────────────── */}
+      {/* Shown when transactions were added or changed after the last settlement compute */}
+      {settlementStale && (
+        <div className="mb-4 flex items-start gap-2.5 px-4 py-3 rounded-xl bg-amber-400/8 border border-amber-400/25 animate-slide-up">
+          <AlertTriangle size={14} className="text-amber-400 flex-shrink-0 mt-0.5" />
+          <div>
+            <span className="text-sm font-medium text-amber-400">Transactions changed since last computation</span>
+            <span className="text-xs text-ink-400 ml-2">Recompute to get updated results.</span>
+          </div>
+        </div>
+      )}
+
       {/* ── Results ─────────────────────────────────────────────────────────── */}
       {settlement && (
         <div className="animate-slide-up">
@@ -598,7 +765,7 @@ export default function SettlementPage() {
               ) : (
                 <div className="space-y-2">
                   {settlement.transfers.map((t, i) => (
-                    <TransferCard key={i} transfer={t} index={i} currency={currency} />
+                    <TransferCard key={i} transfer={t} index={i} currency={currency} groupId={groupId} />
                   ))}
                 </div>
               )}
@@ -629,6 +796,9 @@ export default function SettlementPage() {
               </p>
             </div>
           )}
+
+          {/* Contextual feedback prompt — did the math look right? */}
+          <SettlementFeedback groupId={groupId} />
         </div>
       )}
 

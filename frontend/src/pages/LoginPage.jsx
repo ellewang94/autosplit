@@ -7,7 +7,7 @@
 import { useState } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
-import { Zap, Mail, Lock, AlertCircle, ArrowRight } from 'lucide-react'
+import { Zap, Mail, Lock, AlertCircle, ArrowRight, KeyRound } from 'lucide-react'
 
 // Google's official "G" logo as an inline SVG — no extra dependency needed
 function GoogleIcon() {
@@ -37,6 +37,12 @@ export default function LoginPage() {
   async function handleGoogle() {
     setGoogleLoading(true)
     setError(null)
+    // If we came from a join page, store the invite code so GroupsPage can redirect back
+    const fromPath = location.state?.from?.pathname
+    if (fromPath?.startsWith('/join/')) {
+      const code = fromPath.split('/join/')[1]
+      if (code) sessionStorage.setItem('pendingJoin', code)
+    }
     // This redirects to Google — page will leave, so no need to setLoading(false)
     await signInWithGoogle()
   }
@@ -143,6 +149,17 @@ export default function LoginPage() {
                     required
                   />
                 </div>
+              </div>
+
+              {/* Forgot password — small, unobtrusive, but essential */}
+              <div className="text-right -mt-1">
+                <Link
+                  to="/forgot-password"
+                  className="text-xs text-ink-500 hover:text-ink-300 transition-colors inline-flex items-center gap-1"
+                >
+                  <KeyRound size={10} />
+                  Forgot password?
+                </Link>
               </div>
 
               <button

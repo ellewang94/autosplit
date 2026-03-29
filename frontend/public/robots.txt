@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+Allow: /split
+Allow: /share/
+
+# Keep authenticated app pages private from crawlers
+Disallow: /groups/
+Disallow: /api/
+
+Sitemap: https://autosplit.co/sitemap.xml

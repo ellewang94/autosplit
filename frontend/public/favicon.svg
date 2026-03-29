@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Dark rounded square background -->
+  <rect width="32" height="32" rx="8" fill="#0a0a0f"/>
+  <!-- Electric lime bolt -->
+  <path d="M19 4 L11 17 L16 17 L13 28 L21 15 L16 15 Z" fill="#C8F135"/>
+</svg>

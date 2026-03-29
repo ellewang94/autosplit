@@ -22,14 +22,18 @@ export default {
           800: '#111118',
           700: '#1A1A24',
           600: '#252530',
-          // ink-500 and ink-400 were too dark to read as text on dark backgrounds.
-          // New values pass WCAG AA contrast (4.5:1) on ink-900 backgrounds.
-          500: '#666680',  // was #3A3A4A — lightened significantly for readable muted text
-          400: '#8888A8',  // was #5A5A70 — now ~5.7:1 contrast on ink-900
-          300: '#A8A8C0',  // was #8A8AA0 — slightly lighter to maintain the gradient step
-          200: '#C0C0D4',  // was #B0B0C4 — slightly lighter
-          100: '#D8D8E8',
-          50:  '#F0F0F8',
+          // Obsidian Clarity palette — blue cast removed from light shades.
+          // Previous palette had a 16–24pt blue bias in every light color
+          // (e.g. old ink-100 was #D8D8E8: R=216, G=216, B=232 — B was 16 higher).
+          // That cold lavender tint made whites feel washed-out and muted even
+          // though the raw contrast ratios were technically fine.
+          // New values are neutral-to-warm, crisper, and easier to read at a glance.
+          500: '#72728A',  // was #666680 — slightly brighter, less blue
+          400: '#9898B0',  // was #8888A8 — notably brighter, less blue (6.8:1 on ink-900)
+          300: '#BABACE',  // was #A8A8C0 — brighter, cleaner neutral
+          200: '#D4D4E0',  // was #C0C0D4 — brighter, much less blue
+          100: '#E8E8EE',  // was #D8D8E8 — significantly brighter, near-neutral white
+          50:  '#F6F6F9',  // was #F0F0F8 — near-pure white, minimal tint
         },
         // Electric lime accent — punchy, memorable, decidedly not purple
         lime: {

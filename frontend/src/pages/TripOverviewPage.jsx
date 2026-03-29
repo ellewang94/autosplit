@@ -5,8 +5,10 @@ import { api } from '../api/client'
 import {
   Upload, List, TrendingUp, CheckCircle, AlertTriangle,
   Calendar, Users, ArrowRight, FileText, ChevronRight, Trash2,
+  Link2, Loader,
 } from 'lucide-react'
 import clsx from 'clsx'
+import { useAuth } from '../contexts/AuthContext'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -138,11 +140,33 @@ export default function TripOverviewPage() {
     enabled: !!groupId,
   })
 
+  const { user } = useAuth()
+  const [inviteCopied, setInviteCopied] = useState(false)
+  const [inviteLoading, setInviteLoading] = useState(false)
+
   if (loadingGroup) {
     return <div className="text-ink-500 animate-pulse-soft text-sm">Loading…</div>
   }
 
   const members = group?.members || []
+
+  // True if the current user is the trip owner OR if it's a legacy group (no owner)
+  const isOwner = !group?.owner_id || group.owner_id === user?.id
+
+  async function handleInvite() {
+    setInviteLoading(true)
+    try {
+      const data = await api.getInviteLink(groupId)
+      await navigator.clipboard.writeText(data.invite_url)
+      setInviteCopied(true)
+      setTimeout(() => setInviteCopied(false), 3000)
+    } catch (e) {
+      // Fallback: copy to clipboard failed — show the URL in an alert
+      console.error('Copy failed:', e)
+    } finally {
+      setInviteLoading(false)
+    }
+  }
 
   // ── Compute stats from transactions ───────────────────────────────────────
   const excluded = transactions.filter(t => t.status === 'excluded')
@@ -216,6 +240,23 @@ export default function TripOverviewPage() {
               {members.map(m => m.name).join(', ')}
             </span>
           </div>
+
+          {/* Invite button — only for trip owner */}
+          {isOwner && (
+            <button
+              onClick={handleInvite}
+              disabled={inviteLoading}
+              className="flex items-center gap-1.5 text-xs text-ink-400 hover:text-lime-400 transition-colors mt-3"
+            >
+              {inviteCopied ? (
+                <><CheckCircle size={13} className="text-lime-400" /> Invite link copied!</>
+              ) : inviteLoading ? (
+                <><Loader size={13} className="animate-spin" /> Getting link…</>
+              ) : (
+                <><Link2 size={13} /> Invite friends to this trip</>
+              )}
+            </button>
+          )}
         </div>
       </div>
 
@@ -246,6 +287,22 @@ export default function TripOverviewPage() {
         </div>
       )}
 
+      {/* ── Joined-member guidance banner ─────────────────────────────────── */}
+      {/* Only shown to members who joined via invite link and haven't uploaded yet.
+          The isOwner check comes from group.owner_id vs the current user's ID. */}
+      {!isOwner && !hasStatements && (
+        <div className="bg-lime-400/8 border border-lime-400/20 rounded-2xl px-5 py-4 mb-6 flex items-start gap-3 animate-slide-up">
+          <Upload size={16} className="text-lime-400 flex-shrink-0 mt-0.5" />
+          <div>
+            <div className="text-sm font-medium text-ink-100 mb-1">You've joined this trip</div>
+            <div className="text-xs text-ink-400 leading-relaxed">
+              Upload your card statement so your expenses are included in the final settlement.
+              Select yourself as the card holder when prompted.
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Workflow steps ────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-8">
         <WorkflowCard
@@ -254,10 +311,10 @@ export default function TripOverviewPage() {
           description={
             hasStatements
               ? `${statements.filter(s => !s.is_manual).length} statement${statements.filter(s => !s.is_manual).length > 1 ? 's' : ''} imported`
-              : 'Upload a bank statement or add expenses manually'
+              : 'Upload a PDF or CSV statement, or add cash expenses manually'
           }
           status={importStatus}
-          cta={hasStatements ? 'Import another' : 'Upload PDF'}
+          cta={hasStatements ? 'Import another' : 'Get started'}
           onClick={() => navigate(`/groups/${groupId}/upload`)}
         />
         <WorkflowCard
@@ -382,7 +439,7 @@ export default function TripOverviewPage() {
                       </div>
                     ) : (
                       <button
-                        className="opacity-0 group-hover:opacity-100 p-1 rounded text-ink-500 hover:text-red-400 hover:bg-red-400/10 transition-all"
+                        className="p-1 rounded text-ink-500 hover:text-red-400 hover:bg-red-400/10 transition-all sm:opacity-0 sm:group-hover:opacity-100"
                         title="Delete this statement and all its transactions"
                         onClick={() => setConfirmDeleteStmtId(s.id)}
                       >
@@ -403,14 +460,14 @@ export default function TripOverviewPage() {
           <Upload size={32} className="text-ink-600 mx-auto mb-3" strokeWidth={1.5} />
           <p className="font-display text-lg text-ink-300 mb-1">No statements yet</p>
           <p className="text-sm text-ink-500 mb-5">
-            Upload a Chase credit card PDF to get started
+            Upload a bank statement (PDF or CSV) from Chase, Amex, BofA, Citi, and more — or add expenses manually.
           </p>
           <button
             className="btn-primary mx-auto"
             onClick={() => navigate(`/groups/${groupId}/upload`)}
           >
             <Upload size={14} />
-            Import Statement
+            Import Statement or Add Manually
           </button>
         </div>
       )}

@@ -16,7 +16,7 @@ import { useParams, Link } from 'react-router-dom'
 import { api } from '../api/client'
 import {
   Zap, ArrowRight, Users, DollarSign, CheckCircle, AlertCircle,
-  Calendar, Loader, Eye,
+  Calendar, Loader, Eye, ThumbsUp, ThumbsDown,
 } from 'lucide-react'
 
 // Currency symbols — same map used throughout the app
@@ -77,19 +77,46 @@ function Avatar({ name, index, size = 'md' }) {
 }
 
 
+// ── Payment app deep links ────────────────────────────────────────────────────
+// Build payment URLs that pre-fill the amount and a note so the recipient
+// can pay with as few taps as possible — they just need to find the payee.
+function buildPaymentLinks(amount, note) {
+  const encodedNote = encodeURIComponent(note)
+  const roundedAmount = Math.round(amount * 100) / 100
+  return {
+    // Venmo web — pre-fills amount and note; user selects who to pay
+    venmo: `https://venmo.com/?txn=pay&amount=${roundedAmount}&note=${encodedNote}`,
+    // Cash App web — lands on the app homepage (no universal deep link without $cashtag)
+    cashapp: `https://cash.app/`,
+    // PayPal send money — pre-fills amount
+    paypal: `https://www.paypal.com/myaccount/transfer/homepage/pay`,
+  }
+}
+
 // ── Transfer row ──────────────────────────────────────────────────────────────
-function TransferRow({ transfer, currency, index, memberIndex }) {
-  const [expanded, setExpanded] = useState(false)
+function TransferRow({ transfer, currency, index, memberIndex, tripName }) {
+  const [showMessage, setShowMessage] = useState(false)
+  const [copied, setCopied] = useState(false)
+
+  // Build the note that goes into payment apps: e.g. "Japan Trip 2026 expenses"
+  const paymentNote = tripName ? `${tripName} expenses` : 'Trip expenses'
+  const links = buildPaymentLinks(transfer.amount, paymentNote)
+
+  function copyMessage() {
+    navigator.clipboard.writeText(transfer.payment_request)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
 
   return (
     <div
-      className="bg-ink-800/40 border border-ink-700 rounded-xl p-4 animate-slide-up"
+      className="bg-ink-800/40 border border-ink-700 rounded-xl overflow-hidden animate-slide-up"
       style={{ animationDelay: `${index * 80}ms` }}
     >
-      {/* Main row: From → To + Amount */}
-      <div className="flex items-center gap-3">
+      {/* Main row: who pays whom + amount */}
+      <div className="flex items-center gap-3 p-4">
         {/* Avatars */}
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 flex-shrink-0">
           <Avatar
             name={transfer.from_member_name}
             index={memberIndex(transfer.from_member_name)}
@@ -105,9 +132,11 @@ function TransferRow({ transfer, currency, index, memberIndex }) {
 
         {/* Names */}
         <div className="flex-1 min-w-0">
-          <span className="text-sm font-medium text-ink-100">{transfer.from_member_name}</span>
-          <span className="text-xs text-ink-500 mx-1.5">pays</span>
-          <span className="text-sm font-medium text-ink-100">{transfer.to_member_name}</span>
+          <div className="text-sm font-medium text-ink-100">
+            <span>{transfer.from_member_name}</span>
+            <span className="text-ink-500 mx-1.5 font-normal">pays</span>
+            <span>{transfer.to_member_name}</span>
+          </div>
         </div>
 
         {/* Amount */}
@@ -116,25 +145,68 @@ function TransferRow({ transfer, currency, index, memberIndex }) {
         </div>
       </div>
 
-      {/* Expand: show the copyable payment request message */}
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="mt-2 text-xs text-ink-500 hover:text-ink-300 transition-colors flex items-center gap-1"
-      >
-        <span>{expanded ? 'Hide message' : 'Show payment message'}</span>
-        <ArrowRight size={10} className={`transition-transform ${expanded ? 'rotate-90' : ''}`} />
-      </button>
+      {/* ── Payment action row ──────────────────────────────────────────────
+          This is the key UX fix: recipients can tap to pay directly from this
+          page instead of manually opening Venmo and re-entering everything.
+          Venmo pre-fills the amount + note — they just select who to pay.
+      */}
+      <div className="px-4 pb-4 flex flex-wrap items-center gap-2">
+        {/* Venmo — most popular US payment app */}
+        <a
+          href={links.venmo}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#3D95CE]/15 border border-[#3D95CE]/30 text-[#3D95CE] text-xs font-semibold hover:bg-[#3D95CE]/25 transition-colors"
+        >
+          {/* Venmo "V" monogram */}
+          <span className="font-bold">V</span>
+          Pay via Venmo
+        </a>
 
-      {expanded && (
-        <div className="mt-3 pt-3 border-t border-ink-700/60 animate-slide-up">
+        {/* Cash App */}
+        <a
+          href={links.cashapp}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#00D632]/10 border border-[#00D632]/25 text-[#00D632] text-xs font-semibold hover:bg-[#00D632]/20 transition-colors"
+        >
+          <span className="font-bold">$</span>
+          Cash App
+        </a>
+
+        {/* PayPal */}
+        <a
+          href={links.paypal}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#003087]/15 border border-[#003087]/30 text-[#009CDE] text-xs font-semibold hover:bg-[#003087]/25 transition-colors"
+        >
+          <span className="font-bold">P</span>
+          PayPal
+        </a>
+
+        {/* Copy message — fallback for other payment methods */}
+        <button
+          onClick={() => setShowMessage(!showMessage)}
+          className="inline-flex items-center gap-1 text-xs text-ink-400 hover:text-ink-200 transition-colors ml-auto"
+        >
+          {showMessage ? 'Hide' : 'Payment message'}
+          <ArrowRight size={10} className={`transition-transform ${showMessage ? 'rotate-90' : ''}`} />
+        </button>
+      </div>
+
+      {/* Copyable payment message — for iMessage / WhatsApp etc */}
+      {showMessage && (
+        <div className="px-4 pb-4 animate-slide-up">
           <div className="bg-ink-900 rounded-lg px-3 py-2.5 text-xs text-ink-300 font-mono leading-relaxed border border-ink-700/60">
             {transfer.payment_request}
           </div>
           <button
-            onClick={() => navigator.clipboard.writeText(transfer.payment_request)}
-            className="mt-2 text-xs text-ink-500 hover:text-lime-400 transition-colors"
+            onClick={copyMessage}
+            className={`mt-2 text-xs transition-colors flex items-center gap-1 ${copied ? 'text-lime-400' : 'text-ink-500 hover:text-lime-400'}`}
           >
-            Copy message
+            {copied ? <CheckCircle size={11} /> : null}
+            {copied ? 'Copied!' : 'Copy message'}
           </button>
         </div>
       )}
@@ -149,6 +221,8 @@ export default function SharePage() {
   const [trip, setTrip] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  // Track whether the visitor gave thumbs up or down feedback
+  const [feedbackGiven, setFeedbackGiven] = useState(null)
 
   // Fetch the public trip data on mount
   useEffect(() => {
@@ -288,6 +362,30 @@ export default function SharePage() {
           </div>
         </div>
 
+        {/* ── Spending by category ──────────────────────────────────────── */}
+        {/* Only shown if the backend returned spending_by_category data.
+            Sorted biggest to smallest so the most significant categories lead. */}
+        {Object.keys(trip.spending_by_category || {}).length > 0 && (
+          <div className="mb-8 animate-slide-up">
+            <h2 className="font-display text-base font-semibold text-ink-400 mb-3 uppercase tracking-wide text-xs">
+              Where the money went
+            </h2>
+            <div className="grid grid-cols-2 gap-2">
+              {Object.entries(trip.spending_by_category)
+                .sort(([, a], [, b]) => b - a)   // biggest categories first
+                .map(([cat, amount]) => (
+                  <div key={cat} className="bg-ink-800/40 border border-ink-700 rounded-xl px-4 py-3">
+                    <div className="text-xs text-ink-500 capitalize mb-1">{cat}</div>
+                    <div className="font-mono text-lg font-bold text-ink-100">
+                      {formatAmount(amount, trip.currency)}
+                    </div>
+                  </div>
+                ))
+              }
+            </div>
+          </div>
+        )}
+
         {/* ── Settlement transfers ──────────────────────────────────────── */}
         <div className="mb-10">
           <h2 className="font-display text-xl font-semibold text-ink-100 mb-4 flex items-center gap-2">
@@ -311,32 +409,82 @@ export default function SharePage() {
                   currency={trip.currency}
                   index={i}
                   memberIndex={memberIndex}
+                  tripName={trip.trip_name}
                 />
               ))}
             </div>
           )}
         </div>
 
-        {/* ── CTA: "Try AutoSplit for your next trip" ───────────────────── */}
-        {/* This is the viral loop — non-users see this and sign up */}
-        <div className="bg-ink-900/80 border border-lime-400/20 rounded-2xl p-6 text-center animate-slide-up">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-lime-400 mb-4 shadow-lg shadow-lime-400/20">
-            <Zap size={20} className="text-ink-950" strokeWidth={2.5} />
+        {/* ── Viral loop CTA ────────────────────────────────────────────── */}
+        {/*
+          Persona: recipient who just opened this link.
+          Their job is done (they've paid or noted what they owe).
+          Now we show the "wow, how did they make this?" moment and convert them.
+          Primary pitch = effortlessness. Secondary = free.
+        */}
+        <div className="bg-ink-900/80 border border-lime-400/20 rounded-2xl p-6 animate-slide-up">
+          {/* Divider line between payment section and CTA */}
+          <div className="flex items-center gap-3 mb-5">
+            <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-lime-400 shadow-md shadow-lime-400/20 flex-shrink-0">
+              <Zap size={17} className="text-ink-950" strokeWidth={2.5} />
+            </div>
+            <div>
+              <div className="font-display text-base font-semibold text-ink-50 leading-tight">
+                Split your next trip in minutes
+              </div>
+              <div className="text-xs text-ink-500 mt-0.5">
+                Upload a statement. AutoSplit does the math.
+              </div>
+            </div>
           </div>
-          <h3 className="font-display text-xl font-semibold text-ink-50 mb-2">
-            Plan your next trip?
-          </h3>
-          <p className="text-sm text-ink-400 mb-5 leading-relaxed max-w-xs mx-auto">
-            AutoSplit makes splitting group expenses effortless. Upload your card statement and settle in minutes.
+
+          {/* Social proof-flavored description */}
+          <p className="text-sm text-ink-400 mb-5 leading-relaxed">
+            Your friend used AutoSplit to figure this out automatically — no manual entry,
+            no spreadsheets. It parses your card statement and settles in seconds.
           </p>
+
+          {/* Primary CTA */}
           <Link
             to="/signup"
-            className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-lime-400 text-ink-950 text-sm font-semibold hover:bg-lime-500 active:bg-lime-600 transition-colors shadow-md shadow-lime-400/20"
+            className="flex items-center justify-center gap-2 w-full px-6 py-3 rounded-xl bg-lime-400 text-ink-950 text-sm font-semibold hover:bg-lime-500 active:bg-lime-600 transition-colors shadow-md shadow-lime-400/20 mb-3"
           >
             Try AutoSplit free
             <ArrowRight size={14} />
           </Link>
-          <p className="text-xs text-ink-600 mt-3 font-mono">Your first trip is on us</p>
+
+          {/* Trust / free signal */}
+          <p className="text-center text-xs text-ink-500 font-mono">
+            Free during early access · No credit card needed
+          </p>
+        </div>
+
+        {/* ── Quick feedback ────────────────────────────────────────────── */}
+        {/* Simple thumbs up/down to gauge whether recipients find this page useful.
+            Once clicked, shows a thank-you message instead of the buttons. */}
+        <div className="mt-6 text-center animate-slide-up">
+          {feedbackGiven ? (
+            <p className="text-xs text-ink-500 font-mono">Thanks for the feedback</p>
+          ) : (
+            <>
+              <p className="text-xs text-ink-600 mb-2">Was this clear and useful?</p>
+              <div className="flex items-center justify-center gap-3">
+                <button
+                  onClick={() => setFeedbackGiven('up')}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-ink-700 text-ink-500 hover:border-lime-400/40 hover:text-lime-400 text-xs transition-colors"
+                >
+                  <ThumbsUp size={12} /> Yes
+                </button>
+                <button
+                  onClick={() => setFeedbackGiven('down')}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-ink-700 text-ink-500 hover:border-red-400/40 hover:text-red-400 text-xs transition-colors"
+                >
+                  <ThumbsDown size={12} /> Could be better
+                </button>
+              </div>
+            </>
+          )}
         </div>
 
         {/* Footer */}

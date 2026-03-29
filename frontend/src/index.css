@@ -119,7 +119,9 @@
            border-b border-ink-700 bg-ink-900;
   }
   .data-table td {
-    @apply px-3 py-3 text-sm text-ink-200 border-b border-ink-800/60;
+    /* ink-100 instead of ink-200: transaction amounts/merchants are primary data,
+       not secondary metadata — they deserve full-brightness text. */
+    @apply px-3 py-3 text-sm text-ink-100 border-b border-ink-800/60;
   }
   .data-table tbody tr {
     @apply hover:bg-ink-800/50 transition-colors duration-100;

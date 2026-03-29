@@ -5,9 +5,10 @@
  * For Google signups there's no confirmation step — they're in immediately.
  */
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
-import { Zap, Mail, Lock, AlertCircle, CheckCircle, ArrowRight } from 'lucide-react'
+import { supabase } from '../lib/supabase'
+import { Zap, Mail, Lock, AlertCircle, CheckCircle, ArrowRight, RefreshCw, ChevronDown } from 'lucide-react'
 
 function GoogleIcon() {
   return (
@@ -28,11 +29,25 @@ export default function SignupPage() {
   const [loading, setLoading] = useState(false)
   const [googleLoading, setGoogleLoading] = useState(false)
   const [emailSent, setEmailSent] = useState(false)
+  // Track whether user clicked "resend" so we can show confirmation text
+  const [resent, setResent] = useState(false)
+  // Required: user must check this before creating an account
+  const [tosAccepted, setTosAccepted] = useState(false)
+  // Optional field: "How did you hear about us?"
+  const [hearAbout, setHearAbout] = useState('')
   const { signUp, signInWithGoogle } = useAuth()
+  const location = useLocation()
+  const navigate = useNavigate()
 
   async function handleGoogle() {
     setGoogleLoading(true)
     setError(null)
+    // If we came from a join page, store the invite code so GroupsPage can redirect back
+    const fromPath = location.state?.from?.pathname
+    if (fromPath?.startsWith('/join/')) {
+      const code = fromPath.split('/join/')[1]
+      if (code) sessionStorage.setItem('pendingJoin', code)
+    }
     await signInWithGoogle()
     // Page will redirect to Google — no need to reset state
   }
@@ -42,10 +57,41 @@ export default function SignupPage() {
     setError(null)
     if (password !== confirm) { setError("Passwords don't match."); return }
     if (password.length < 6) { setError('Password must be at least 6 characters.'); return }
+    if (!tosAccepted) { setError('Please accept the Terms of Service and Privacy Policy to continue.'); return }
     setLoading(true)
-    const { error } = await signUp(email, password)
+
+    // Save the "how did you hear" answer to localStorage for analytics.
+    // We do this BEFORE the signup call so it's stored even if something goes sideways.
+    if (hearAbout) {
+      localStorage.setItem('autosplit_hear_about', hearAbout)
+    }
+
+    const { data, error } = await signUp(email, password)
     setLoading(false)
-    if (error) { setError(error.message) } else { setEmailSent(true) }
+
+    if (error) {
+      setError(error.message)
+    } else if (data?.session) {
+      // Supabase auto-confirmed the user (email confirmation is disabled in the dashboard).
+      // Session exists immediately — redirect straight to /groups.
+      navigate('/groups', { replace: true })
+    } else {
+      // Supabase requires email confirmation — show the check-email screen.
+      setEmailSent(true)
+    }
+  }
+
+  // Resend the confirmation email using Supabase's resend API.
+  // This is useful when the user doesn't receive the first email.
+  async function handleResend() {
+    setResent(false)
+    try {
+      await supabase.auth.resend({ type: 'signup', email })
+      setResent(true)
+    } catch (err) {
+      // If resend fails, silently ignore — it's a non-critical feature
+      console.error('Resend failed:', err)
+    }
   }
 
   // ── Email confirmation sent state ─────────────────────────────────────────
@@ -62,9 +108,27 @@ export default function SignupPage() {
             We sent a confirmation link to <span className="text-ink-200 font-medium">{email}</span>.
             Click it to activate your account, then sign in.
           </p>
-          <Link to="/login" className="btn-secondary inline-flex items-center gap-2">
+          <Link to="/login" className="btn-secondary inline-flex items-center gap-2 mb-5">
             Back to sign in <ArrowRight size={13} />
           </Link>
+
+          {/* Resend confirmation email — helpful if the email doesn't arrive */}
+          <div className="mt-2">
+            {resent ? (
+              <p className="text-xs text-lime-400 font-mono flex items-center justify-center gap-1.5">
+                <CheckCircle size={12} />
+                Sent! Check your inbox again.
+              </p>
+            ) : (
+              <button
+                onClick={handleResend}
+                className="text-xs text-ink-500 hover:text-ink-300 transition-colors flex items-center gap-1.5 mx-auto"
+              >
+                <RefreshCw size={11} />
+                Resend confirmation email
+              </button>
+            )}
+          </div>
         </div>
       </div>
     )
@@ -149,7 +213,64 @@ export default function SignupPage() {
                     value={confirm} onChange={(e) => setConfirm(e.target.value)} required />
                 </div>
               </div>
-              <button type="submit" className="btn-primary w-full justify-center gap-2" disabled={loading || googleLoading}>
+              {/* ── Optional attribution field ────────────────────────────────── */}
+              {/* We use this data to understand which channels are driving signups.
+                  This is optional — the user can leave it blank. */}
+              <div>
+                <label className="label mb-1.5">How did you hear about us? <span className="text-ink-600 normal-case font-normal">(optional)</span></label>
+                <div className="relative">
+                  <ChevronDown size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-500 pointer-events-none" />
+                  <select
+                    className="select w-full text-sm appearance-none pr-8"
+                    value={hearAbout}
+                    onChange={(e) => setHearAbout(e.target.value)}
+                  >
+                    <option value="">Select an option…</option>
+                    <option value="Friend / word of mouth">Friend / word of mouth</option>
+                    <option value="Reddit">Reddit</option>
+                    <option value="Product Hunt">Product Hunt</option>
+                    <option value="Hacker News">Hacker News</option>
+                    <option value="Google search">Google search</option>
+                    <option value="TikTok / Instagram">TikTok / Instagram</option>
+                    <option value="Twitter / X">Twitter / X</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* ── Terms of Service acceptance — required field ─────────────── */}
+              {/* Users must explicitly agree before we create their account.
+                  This is both a legal requirement and good trust-building practice. */}
+              <label className="flex items-start gap-2.5 cursor-pointer group">
+                <div className="relative flex-shrink-0 mt-0.5">
+                  <input
+                    type="checkbox"
+                    checked={tosAccepted}
+                    onChange={(e) => setTosAccepted(e.target.checked)}
+                    className="sr-only"
+                  />
+                  {/* Custom checkbox visual — green when checked */}
+                  <div className={`w-4 h-4 rounded border transition-all ${
+                    tosAccepted
+                      ? 'bg-lime-400 border-lime-400'
+                      : 'border-ink-600 bg-ink-800 group-hover:border-ink-400'
+                  } flex items-center justify-center`}>
+                    {tosAccepted && (
+                      <svg width="9" height="7" viewBox="0 0 9 7" fill="none">
+                        <path d="M1 3.5L3.5 6L8 1" stroke="#07070A" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                    )}
+                  </div>
+                </div>
+                <span className="text-xs text-ink-400 leading-relaxed">
+                  I agree to AutoSplit's{' '}
+                  <Link to="/terms" target="_blank" className="text-lime-400 hover:underline">Terms of Service</Link>
+                  {' '}and{' '}
+                  <Link to="/privacy" target="_blank" className="text-lime-400 hover:underline">Privacy Policy</Link>
+                </span>
+              </label>
+
+              <button type="submit" className="btn-primary w-full justify-center gap-2" disabled={loading || googleLoading || !tosAccepted}>
                 {loading ? 'Creating account…' : (<>Create account <ArrowRight size={14} /></>)}
               </button>
             </form>

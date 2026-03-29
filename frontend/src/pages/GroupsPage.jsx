@@ -1,7 +1,9 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
+import { trackTripCreated } from '../lib/analytics'
+import OnboardingModal from '../components/OnboardingModal'
 import {
   Users, Plus, Trash2, UserPlus,
   ChevronRight, X, Check, Calendar,
@@ -143,7 +145,7 @@ function GroupCard({ group }) {
             <MemberAvatar name={m.name} index={i} />
             <span className="flex-1 text-sm text-ink-200 font-medium">{m.name}</span>
             <button
-              className="opacity-0 group-hover:opacity-100 text-ink-500 hover:text-red-400 transition-all"
+              className="text-ink-500 hover:text-red-400 transition-all sm:opacity-0 sm:group-hover:opacity-100"
               onClick={() => deleteMember.mutate(m.id)}
             >
               <X size={13} />
@@ -216,6 +218,8 @@ function CreateGroupForm({ onDone }) {
       setStartDate('')
       setEndDate('')
       setBaseCurrency('USD')
+      // Track the new trip event — tells us how many trips active users create
+      trackTripCreated()
       onDone?.()
     },
   })
@@ -294,10 +298,33 @@ function CreateGroupForm({ onDone }) {
 
 export default function GroupsPage() {
   const [creating, setCreating] = useState(false)
+  const navigate = useNavigate()
+
+  // Show onboarding modal to first-time users.
+  // Once they dismiss it, localStorage tracks that they've seen it.
+  const [showOnboarding, setShowOnboarding] = useState(false)
+  useEffect(() => {
+    if (!localStorage.getItem('autosplit_onboarded')) {
+      // Small delay so the page loads first before the modal pops up
+      const t = setTimeout(() => setShowOnboarding(true), 600)
+      return () => clearTimeout(t)
+    }
+  }, [])
+
   const { data: groups = [], isLoading } = useQuery({
     queryKey: ['groups'],
     queryFn: api.getGroups,
   })
+
+  // After Google OAuth, the user lands here. If they had a pending invite,
+  // redirect them back to complete the join flow.
+  useEffect(() => {
+    const pendingJoin = sessionStorage.getItem('pendingJoin')
+    if (pendingJoin) {
+      sessionStorage.removeItem('pendingJoin')
+      navigate(`/join/${pendingJoin}`, { replace: true })
+    }
+  }, [navigate])
 
   return (
     <div>
@@ -368,6 +395,9 @@ export default function GroupsPage() {
           ))}
         </div>
       )}
+
+      {/* Onboarding modal — shown once to first-time users */}
+      {showOnboarding && <OnboardingModal onClose={() => setShowOnboarding(false)} />}
     </div>
   )
 }

@@ -15,6 +15,7 @@
  */
 import { createContext, useContext, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { identifyUser, resetIdentity } from '../lib/analytics'
 
 // Create the context (like creating the bulletin board)
 const AuthContext = createContext(null)
@@ -39,8 +40,18 @@ export function AuthProvider({ children }) {
 
     // 2. Subscribe to future auth changes (sign in, sign out, token refresh)
     // This fires any time auth state changes, keeping the UI in sync.
+    // We also call identifyUser() here so PostHog links all events to this user ID.
+    // On sign-out, we reset the PostHog identity so the next user gets a clean slate.
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null)
+      if (session?.user) {
+        // Link PostHog session recordings and events to this user's Supabase ID.
+        // We deliberately use the user ID (not email) to avoid sending PII to PostHog.
+        identifyUser(session.user.id)
+      } else {
+        // User signed out — reset PostHog so the next person gets a fresh anonymous session
+        resetIdentity()
+      }
     })
 
     // 3. Clean up the subscription when the component unmounts
@@ -53,8 +64,12 @@ export function AuthProvider({ children }) {
    * Returns { error } — error is null if successful.
    */
   const signUp = async (email, password) => {
-    const { error } = await supabase.auth.signUp({ email, password })
-    return { error }
+    // Return both data and error — data.session is non-null when Supabase
+    // auto-confirms the user (i.e. email confirmation is disabled in the dashboard).
+    // SignupPage uses this to redirect straight to /groups instead of showing
+    // the "check your email" screen.
+    const { data, error } = await supabase.auth.signUp({ email, password })
+    return { data, error }
   }
 
   /**

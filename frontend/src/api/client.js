@@ -234,6 +234,27 @@ export const api = {
       body: JSON.stringify({ feedback_type: feedbackType, message, email, page }),
     }),
 
+  // ── Trip Invites ──────────────────────────────────────────────────────────
+  // Get (or generate) the invite link for a trip you own.
+  // Returns { invite_code, invite_url }
+  getInviteLink: (groupId) => request(`/groups/${groupId}/invite-link`),
+
+  // Preview a trip from an invite link — no auth required.
+  // Returns { trip_name, start_date, end_date, member_count, unclaimed_members, invite_code }
+  getInvitePreview: (inviteCode) => request(`/invite/${inviteCode}`),
+
+  // Join a trip via invite link — auth required.
+  // claimMemberId: id of an existing unclaimed member to claim (or null)
+  // newName: join as a brand new member with this name (or null)
+  joinTrip: (inviteCode, { claimMemberId, newName } = {}) =>
+    request(`/invite/${inviteCode}/join`, {
+      method: 'POST',
+      body: JSON.stringify({
+        member_id: claimMemberId || null,
+        name: newName || null,
+      }),
+    }),
+
   exportJSON: async (groupId, payerMemberId, statementId = null) => {
     const authHeader = await getAuthHeader()
     const res = await fetch(`${BASE}/groups/${groupId}/settlement/export-json`, {

@@ -1989,7 +1989,7 @@ export default function TransactionsPage() {
                               </button>
                             </div>
                           ) : (
-                            <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5 justify-end">
+                            <div className="transition-opacity flex items-center gap-0.5 justify-end sm:opacity-0 sm:group-hover:opacity-100">
                               {isExcluded ? (
                                 // Already excluded — show "include" to rescue it
                                 <button

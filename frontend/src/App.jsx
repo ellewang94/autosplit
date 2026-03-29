@@ -8,7 +8,14 @@ import SettlementPage from './pages/SettlementPage'
 import LoginPage from './pages/LoginPage'
 import SignupPage from './pages/SignupPage'
 import SharePage from './pages/SharePage'
+import JoinPage from './pages/JoinPage'
 import LandingPage from './pages/LandingPage'
+import SplitCalculatorPage from './pages/SplitCalculatorPage'
+import PrivacyPage from './pages/PrivacyPage'
+import TermsPage from './pages/TermsPage'
+import ForgotPasswordPage from './pages/ForgotPasswordPage'
+import ResetPasswordPage from './pages/ResetPasswordPage'
+import NotFoundPage from './pages/NotFoundPage'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { Zap } from 'lucide-react'
 
@@ -81,6 +88,16 @@ function AppRoutes() {
       <Route path="/signup" element={<SignupPage />} />
       {/* Share page — public read-only trip view, no login needed */}
       <Route path="/share/:shareCode" element={<SharePage />} />
+      {/* Trip invite — lets friends join a trip and contribute their statements */}
+      <Route path="/join/:inviteCode" element={<JoinPage />} />
+      {/* Free expense calculator — SEO asset + product funnel, no login needed */}
+      <Route path="/split" element={<SplitCalculatorPage />} />
+      {/* Legal pages — public, no login needed */}
+      <Route path="/privacy" element={<PrivacyPage />} />
+      <Route path="/terms" element={<TermsPage />} />
+      {/* Password reset flow — both routes are public (no session yet) */}
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
 
       {/* ── Protected routes (must be signed in) ───────────────────────────── */}
       <Route
@@ -97,6 +114,9 @@ function AppRoutes() {
         <Route path="/groups/:groupId/transactions" element={<TransactionsPage />} />
         <Route path="/groups/:groupId/settlement" element={<SettlementPage />} />
       </Route>
+
+      {/* Catch-all: any unknown URL shows the 404 page */}
+      <Route path="*" element={<NotFoundPage />} />
     </Routes>
   )
 }

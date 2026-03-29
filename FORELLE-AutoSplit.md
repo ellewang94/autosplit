@@ -331,4 +331,96 @@ The fix: a `conftest.py` + `shared.py` pattern. One shared engine, one override,
 
 ---
 
-*Built with FastAPI · SQLite → PostgreSQL · React · Tailwind · Railway · Supabase · Vercel.*
+## Chapter 4: Going Live — Cloud, Auth, and the Pre-MVP Checklist
+
+*This chapter covers the sprint from "working locally" to "ready to ship to real users."*
+
+### The Cloud Migration
+
+The app started as local-only — all data on your laptop in SQLite. For real users to collaborate (especially the share-your-results viral loop), everything needed to move to the cloud.
+
+**What moved where:**
+- **Database**: SQLite → PostgreSQL hosted on Supabase. Think of Supabase as "Firebase but built on real SQL." You get a hosted Postgres database, auth, and file storage all in one dashboard. The switch required updating the SQLAlchemy database URL from `sqlite:///...` to `postgresql://...` and adding the `psycopg2` driver.
+- **Auth**: Supabase Auth. Instead of rolling custom sessions and password hashing, Supabase handles it all — including Google OAuth. Your backend validates Supabase JWT tokens on every request using the service role key.
+- **Backend hosting**: Railway. One `railway.toml` config file and your FastAPI app deploys automatically when you push to GitHub.
+- **Frontend hosting**: Vercel. Point Vercel at the GitHub repo, add environment variables, and it deploys on every push. Zero config.
+
+**The key architectural lesson from cloud migration:** Your backend API layer barely changed. Because we followed clean architecture from the start (routes → services → domain → database), swapping SQLite for PostgreSQL was mostly a config change — not a code rewrite. The domain logic in `settlement.py` and `categories.py` doesn't know or care what database is underneath it.
+
+### How Supabase Auth Works (in plain English)
+
+When a user signs up or logs in, Supabase gives them a **JWT token** — think of it as a tamper-proof ID card that expires after one hour. The frontend stores this in localStorage and sends it on every API request in the `Authorization: Bearer <token>` header.
+
+The backend validates this token using Supabase's public key (no database lookup needed — JWTs are cryptographically self-verifying). If the token checks out, the backend knows who the user is and can check that they own the trip they're trying to access.
+
+**Why Google OAuth is the primary CTA:** Email/password requires the user to remember a password. Google OAuth is one click, and most of your users already have Google accounts. The friction difference is enormous — expect Google signups to convert 2-3x better.
+
+**The email confirmation gotcha:** When you sign up with email/password in Supabase, by default it sends a confirmation email. For development, this means you get stuck at "check your email." The fix is to go to Supabase dashboard → Auth → Providers and disable email confirmation. We also handled the case gracefully in code: if `data.session` comes back immediately, the user is auto-confirmed — navigate straight to `/groups`. If not, show the "check your email" screen.
+
+### Parsing Capital One PDFs
+
+Real-world testing with a Hawaii trip revealed a new bank format we hadn't handled: Capital One.
+
+Capital One's PDF statements print each transaction as two dates on the same line: `Oct 15 Oct 17 MERCHANT $6.34`. The first date is the purchase date, the second is when it posted. Every other parser we had handled one date, not two.
+
+The fix: a new regex pattern (`PATTERN_TWO_DATE`) that matches this two-date format, a new function (`_try_parse_two_date_line`) that handles it, and a new month abbreviation lookup (`_MONTH_ABBR`) for the abbreviated month names Capital One uses (`Oct` not `October`).
+
+The trickiest part: Capital One's payment lines look like `Oct 15 Oct 17 AUTOPAY PYMT - $500.00` — the `-` before the amount is a sign that the amount should be skipped (it's a payment, not a purchase). The negative lookbehind in the regex `(?<!\-)` wasn't catching this because of the space before the `-`. We added a second check: if the description ends with ` -`, skip the line.
+
+**The lesson:** Always test with real files from the actual banks your users have. Synthetic tests won't catch the format quirks that real PDF export engines produce.
+
+### Pre-MVP Launch Checklist
+
+Before any product ships, there's a list of "table stakes" — things that aren't features but are necessary for the product to look like a real company made it:
+
+**1. OG meta tags** — When someone shares your URL on Slack, iMessage, or Twitter, the platform generates a preview card. This requires specific `<meta>` tags in your `<head>`: `og:title`, `og:description`, `og:image`, `og:url`. Without them, shares look like broken links. We added these to `index.html`.
+
+**2. OG image** — The `og:image` needs to be a real PNG file (1200×630 pixels — this is the universal standard). We generated it with Python's Pillow library: dark background, the AutoSplit logo mark, serif title, tagline, lime accent line. The image is served as a static file from `public/og-image.png`.
+
+**3. robots.txt** — Tells search engine bots which pages to index. We allow the landing page, split calculator, and share pages (public content that should rank). We disallow `/groups/` (user data — shouldn't appear in Google). This file lives at `public/robots.txt` and Vite serves it from the domain root.
+
+**4. sitemap.xml** — Tells Google what pages exist and when they were last updated. Only public pages go here: `/`, `/split`. Dynamic pages like `/groups/:id` aren't listed because each user's data is private.
+
+**5. Proper favicon** — The browser tab icon. We created an SVG (dark rounded square + lime lightning bolt) instead of a `.ico` file. SVG favicons are supported by all modern browsers and stay crisp at any size.
+
+**6. 404 page** — Any URL that doesn't exist should show a friendly, on-brand page rather than the browser's default "can't be reached" error. We added a `NotFoundPage` and a catch-all route (`path="*"`) in the React router.
+
+### Mobile UAT: Catching What Desktops Hide
+
+"UAT" stands for User Acceptance Testing — the process of going through the app systematically from a real user's perspective, across different devices and scenarios.
+
+The most impactful mobile bug we found: **delete buttons that only appear on hover.** On desktop, you hover over a row and a trash icon fades in. On a phone, there's no hover state — the button was permanently invisible. The CSS pattern `opacity-0 group-hover:opacity-100` is the culprit.
+
+The fix: make the button visible on mobile, hide-on-hover only on desktop. The Tailwind classes become `sm:opacity-0 sm:group-hover:opacity-100` — the `sm:` prefix means "apply this on screens 640px and wider." On small screens (phones), the `opacity-0` never applies, so the button is always visible. This pattern appeared in four files: `GroupsPage.jsx`, `TripOverviewPage.jsx`, `UploadPage.jsx`, and `TransactionsPage.jsx`.
+
+**The broader mobile lesson:** Always test on a real phone, not just the Chrome DevTools simulator. DevTools simulates the viewport size but not touch events, hover states, or the iOS/Android keyboard pushing the viewport up. The opacity-hover bug is invisible in DevTools.
+
+### The Share-and-Grow Loop
+
+The viral growth mechanism: the trip organizer clicks "Share trip" on the Settlement page, which generates a public read-only link (`autosplit.co/share/abc123`). They paste this into iMessage/WhatsApp. The friend who receives the link sees a beautiful summary of who owes what — with their name, amount, and payment app links (Venmo/CashApp/PayPal). The CTA at the bottom: "Want to split your next trip the easy way? Try AutoSplit free."
+
+This is the growth loop: one happy user → multiple non-user friends who see the product working → some fraction sign up → each of them creates more trips → more friends see it.
+
+The technical piece: the `SharePage` is completely public (no auth required). It reads a `share_code` from the URL, fetches the trip data from the backend, and renders it. The backend only returns the data if the share code is valid and hasn't been revoked.
+
+### Bugs We Hit in This Chapter
+
+**The Supabase JWT validation scope mismatch** — Initially, the backend used the Supabase "anon key" to validate tokens, which worked for public API access but had permission issues for certain admin operations. Switching to the "service role key" (kept secret on the backend only — never exposed to the frontend) resolved this.
+
+**Capital One payment detection** — A $500 autopayment was being captured as a $500 purchase because the negative lookbehind in the regex wasn't matching the ` -` at the end of the description. The regex engine scans the amount field, not the description suffix. Added an explicit description string check as a belt-and-suspenders fix.
+
+**The `ParsedStatement` vs `ParsedTransaction` confusion** — When writing a test script to verify Capital One parsing, tried to access `result.parse_confidence` — which exists on `ParsedTransaction` objects but not on `ParsedStatement`. The dataclasses have different shapes. When you see `AttributeError: 'ParsedStatement' object has no attribute 'parse_confidence'`, it means you're reading the parser's container object when you meant to read one of its transaction items.
+
+### Lessons for Future You
+
+**"Table stakes" are real.** The meta tags, robots.txt, sitemap, and favicon don't feel like features, but they're what separates "looks like a real product" from "looks like a prototype." Do them before the first real user touches the app, not after.
+
+**The hover pattern bites every mobile app.** Desktop designers default to hover interactions because they're on a desktop. Go through every `hover:` class in your Tailwind code and ask: what happens on touch? Sometimes it's fine (hover colors on links don't matter on mobile). Sometimes it's catastrophic (a button that's invisible on touch devices).
+
+**Test with real data early.** We caught the Capital One parsing bug because we uploaded a real statement from a real Hawaii trip. Synthetic test data never has the weird formatting quirks, truncated merchant names, or payment lines that real bank exports contain.
+
+**Cloud migration is mostly config, not code** — if you built with clean architecture. The settlement math, categorization, and parsing are identical between the SQLite version and the PostgreSQL cloud version. The only change was the database URL and the addition of auth middleware. Good architecture pays dividends.
+
+---
+
+*Built with FastAPI · PostgreSQL · React · Tailwind · Railway · Supabase · Vercel.*

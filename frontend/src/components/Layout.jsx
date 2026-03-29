@@ -5,7 +5,7 @@ import { api } from '../api/client'
 import { useAuth } from '../contexts/AuthContext'
 import {
   Users, Upload, List, TrendingUp, ChevronRight, Zap, LayoutDashboard, Menu, X,
-  MessageSquare, CheckCircle, Bug, Lightbulb, HelpCircle, LogOut, User,
+  MessageSquare, CheckCircle, Bug, Lightbulb, HelpCircle, LogOut, User, Shield,
 } from 'lucide-react'
 import clsx from 'clsx'
 
@@ -264,6 +264,14 @@ function SidebarContent({ groupId, onNavigate, onFeedback }) {
           <MessageSquare size={13} strokeWidth={1.75} />
           Give Feedback
         </button>
+
+        {/* Legal links — small and unobtrusive but must be present */}
+        <div className="flex items-center gap-1 px-3">
+          <Shield size={10} className="text-ink-700 flex-shrink-0" />
+          <Link to="/privacy" className="text-[10px] text-ink-700 hover:text-ink-500 transition-colors font-mono">Privacy</Link>
+          <span className="text-ink-800 text-[10px]">·</span>
+          <Link to="/terms" className="text-[10px] text-ink-700 hover:text-ink-500 transition-colors font-mono">Terms</Link>
+        </div>
 
         {/* User info + sign-out */}
         {user && (
