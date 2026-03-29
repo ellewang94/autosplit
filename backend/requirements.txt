@@ -14,3 +14,5 @@ python-jose[cryptography]==3.3.0
 python-dotenv==1.0.1
 # Stripe payment processing (Phase 3)
 stripe==11.4.0
+# Error tracking — catches crashes in production and sends them to Sentry
+sentry-sdk[fastapi]==2.19.2
