@@ -150,7 +150,7 @@ export default function SignupPage() {
           <h1 className="font-display text-3xl font-semibold text-ink-50 leading-tight">
             Create account
           </h1>
-          <p className="text-sm text-ink-400 mt-1.5">Your first trip is on us</p>
+          <p className="text-sm text-ink-400 mt-1.5">Free to use &middot; No credit card needed</p>
         </div>
 
         <div className="bg-ink-900 border border-ink-700 rounded-2xl shadow-2xl overflow-hidden">

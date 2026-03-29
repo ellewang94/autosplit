@@ -5,7 +5,7 @@ import { api } from '../api/client'
 import {
   Upload, List, TrendingUp, CheckCircle, AlertTriangle,
   Calendar, Users, ArrowRight, FileText, ChevronRight, Trash2,
-  Link2, Loader,
+  Link2, Loader, Plus,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useAuth } from '../contexts/AuthContext'
@@ -345,6 +345,24 @@ export default function TripOverviewPage() {
           onClick={() => navigate(`/groups/${groupId}/settlement`)}
           disabled={!hasTransactions}
         />
+      </div>
+
+      {/* ── Add expense manually — prominent shortcut ─────────────────────── */}
+      {/* Airbnb bookings, cash meals, Ubers paid by one person — these often
+          aren't on a credit card statement. This button surfaces the manual
+          entry flow so users don't miss it. It opens the Add Expense modal
+          on the transactions page via navigation state. */}
+      <div className="flex items-center justify-between mb-6 px-1">
+        <p className="text-xs text-ink-500 leading-relaxed">
+          Have an Airbnb, cash meal, or shared cost not on any card?
+        </p>
+        <button
+          className="flex items-center gap-1.5 text-xs font-semibold text-lime-400 hover:text-lime-300 transition-colors ml-4 flex-shrink-0"
+          onClick={() => navigate(`/groups/${groupId}/transactions`, { state: { openAddExpense: true } })}
+        >
+          <Plus size={12} />
+          Add expense manually
+        </button>
       </div>
 
       {/* ── Imported statements list ──────────────────────────────────────── */}

@@ -52,7 +52,7 @@ export default function TermsPage() {
           Fair terms for everyone.
         </h1>
         <p className="text-sm text-ink-400 mb-10">
-          Effective date: March 28, 2026 · AutoSplit, operated by Elle Wang
+          Effective date: March 28, 2026 · AutoSplit, operated by AutoSplit
         </p>
 
         <Section title="1. Acceptance of these terms">
@@ -129,7 +129,7 @@ export default function TermsPage() {
 
         <Section title="8. Intellectual property">
           <p>
-            AutoSplit and its contents (design, code, copy) are owned by Elle Wang. You may not reproduce, distribute,
+            AutoSplit and its contents (design, code, copy) are owned by AutoSplit. You may not reproduce, distribute,
             or create derivative works without permission.
           </p>
           <p>
@@ -153,7 +153,7 @@ export default function TermsPage() {
 
         <Section title="10. Limitation of liability">
           <p>
-            <strong className="text-ink-200">TO THE MAXIMUM EXTENT PERMITTED BY LAW, ELLE WANG AND AUTOSPLIT SHALL NOT BE
+            <strong className="text-ink-200">TO THE MAXIMUM EXTENT PERMITTED BY LAW, AUTOSPLIT SHALL NOT BE
             LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, INCLUDING BUT NOT LIMITED
             TO LOSS OF MONEY, GOODWILL, OR DATA, ARISING FROM YOUR USE OF THE SERVICE.</strong>
           </p>
@@ -166,7 +166,7 @@ export default function TermsPage() {
 
         <Section title="11. Indemnification">
           <p>
-            You agree to indemnify and hold harmless Elle Wang, AutoSplit, and its affiliates from any claims, damages,
+            You agree to indemnify and hold harmless AutoSplit, AutoSplit, and its affiliates from any claims, damages,
             or expenses (including reasonable legal fees) arising from your use of the Service or your violation of
             these terms.
           </p>

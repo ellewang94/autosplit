@@ -83,8 +83,8 @@ function SharePreviewCard() {
       <div className="p-4 space-y-2">
         <div className="text-[10px] text-ink-400 font-mono uppercase tracking-wider mb-3">Settlement</div>
         {[
-          { from: 'Tom', to: 'Elle', amount: '¥142,600' },
-          { from: 'Priya', to: 'Elle', amount: '¥89,400' },
+          { from: 'Tom', to: 'Alex', amount: '¥142,600' },
+          { from: 'Priya', to: 'Alex', amount: '¥89,400' },
         ].map((t, i) => (
           <div key={i} className="flex items-center gap-2 bg-ink-800/50 rounded-lg px-3 py-2.5 border border-ink-700/50">
             {/* From avatar */}
@@ -241,7 +241,7 @@ export default function LandingPage() {
       <div className="relative z-10 border-y border-ink-800">
         <div className="max-w-5xl mx-auto px-6 py-4">
           <div className="flex flex-wrap items-center justify-center gap-x-8 gap-y-2">
-            <span className="text-[11px] text-ink-400 font-mono uppercase tracking-widest">Imports from</span>
+            <span className="text-[11px] text-ink-400 font-mono uppercase tracking-widest">Upload statements from</span>
             {BANKS.map(bank => (
               <span key={bank} className="text-sm text-ink-300 font-mono">{bank}</span>
             ))}
@@ -350,7 +350,7 @@ export default function LandingPage() {
               {[
                 { from: 'Sam', msg: "Hey — here's the trip breakdown, click to see what you owe →", right: false },
                 { from: 'You', msg: 'Wait this is actually really clean. How did you make this??', right: true },
-                { from: 'Sam', msg: 'AutoSplit. Literally 10 mins. First trip is free btw', right: false },
+                { from: 'Sam', msg: 'AutoSplit. Literally 10 mins. Takes about 10 minutes total.', right: false },
               ].map((bubble, i) => (
                 <div
                   key={i}
@@ -385,7 +385,7 @@ export default function LandingPage() {
                 to="/signup"
                 className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-lime-400 text-ink-950 text-sm font-bold hover:bg-lime-500 transition-colors shadow-md shadow-lime-400/15"
               >
-                Create your first trip free
+                Get started — it's free
                 <ArrowRight size={13} />
               </Link>
             </div>
@@ -405,7 +405,7 @@ export default function LandingPage() {
             <span className="text-lime-400">Be ready.</span>
           </h2>
           <p className="text-ink-400 text-base mb-8 leading-relaxed max-w-sm mx-auto">
-            Set up in minutes. First trip completely free. No credit card needed.
+            Set up in minutes. No credit card needed.
           </p>
           <div className="flex flex-wrap gap-3 justify-center">
             <Link

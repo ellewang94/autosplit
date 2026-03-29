@@ -49,7 +49,7 @@ export default function PrivacyPage() {
           Your data, your control.
         </h1>
         <p className="text-sm text-ink-400 mb-10">
-          Effective date: March 28, 2026 · AutoSplit, operated by Elle Wang
+          Effective date: March 28, 2026 · AutoSplit, operated by AutoSplit
         </p>
 
         {/* TL;DR — the most important part, shown first */}
@@ -78,7 +78,7 @@ export default function PrivacyPage() {
         <Section title="1. Who we are">
           <p>
             AutoSplit ("we," "us," "our") is a web application that helps friend groups split shared trip expenses.
-            It is operated by Elle Wang, based in San Mateo, California.
+            It is operated by AutoSplit, based in San Mateo, California.
             You can reach us at <a href="mailto:hello@autosplit.co" className="text-lime-400 hover:underline">hello@autosplit.co</a>.
           </p>
         </Section>

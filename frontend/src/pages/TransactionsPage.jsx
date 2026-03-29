@@ -1,5 +1,5 @@
-import { useState, useMemo } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useState, useMemo, useEffect } from 'react'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 import {
@@ -1164,6 +1164,7 @@ function AddExpenseModal({ groupId, members, group, onClose, onSaved }) {
 export default function TransactionsPage() {
   const { groupId } = useParams()
   const navigate = useNavigate()
+  const location = useLocation()
   const qc = useQueryClient()
 
   // Which rows are checked (main table bulk selection)
@@ -1191,6 +1192,16 @@ export default function TransactionsPage() {
 
   // Whether the Add Expense modal is open
   const [showAddExpense, setShowAddExpense] = useState(false)
+
+  // If we arrived here via the "Add expense manually" shortcut from TripOverview,
+  // auto-open the modal so the user doesn't have to hunt for it.
+  useEffect(() => {
+    if (location.state?.openAddExpense) {
+      setShowAddExpense(true)
+      // Clear the navigation state so a page refresh doesn't re-open the modal
+      window.history.replaceState({}, '', window.location.pathname)
+    }
+  }, [location.state])
 
   // ID of the transaction currently showing "Delete?" confirmation
   // (null = no confirmation visible). One at a time — clicking another row resets it.
