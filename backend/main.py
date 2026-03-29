@@ -18,10 +18,41 @@ from dotenv import load_dotenv
 # In production (Railway), env vars are injected directly — load_dotenv() is harmless there.
 load_dotenv()
 
+# ── Sentry: Backend Error Tracking ────────────────────────────────────────────
+# Catches unhandled exceptions and Python errors in production.
+# Only initializes if SENTRY_DSN is set — safe to leave unconfigured in local dev.
+#
+# HOW TO SET UP:
+#   1. Sign up at https://sentry.io (free tier covers us easily)
+#   2. Create a new project → choose "Python" → "FastAPI"
+#   3. Copy the DSN from the setup page
+#   4. Set SENTRY_DSN=https://xxx@xxx.ingest.sentry.io/xxx in Railway env vars
+#      (or in backend/.env for local testing)
+#
+# We intentionally DON'T call sentry_sdk.set_user() so no user emails are sent.
+_sentry_dsn = os.getenv("SENTRY_DSN", "")
+if _sentry_dsn:
+    import sentry_sdk
+    from sentry_sdk.integrations.fastapi import FastApiIntegration
+    from sentry_sdk.integrations.starlette import StarletteIntegration
+    sentry_sdk.init(
+        dsn=_sentry_dsn,
+        environment=os.getenv("RAILWAY_ENVIRONMENT", "production"),
+        # Capture 10% of requests as performance traces — enough to spot slow endpoints
+        traces_sample_rate=0.1,
+        integrations=[
+            StarletteIntegration(transaction_style="endpoint"),
+            FastApiIntegration(transaction_style="endpoint"),
+        ],
+        # Don't send request bodies — they can contain user financial data
+        send_default_pii=False,
+    )
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import init_db, run_migrations
 from api.routes import router
+from api.webhooks import webhook_router
 
 app = FastAPI(
     title="AutoSplit API",
@@ -77,6 +108,10 @@ async def startup():
 # Mount all routes under /api prefix
 # Example: GET /api/groups, POST /api/groups/{id}/statements/upload
 app.include_router(router, prefix="/api")
+
+# Mount webhook routes — these receive events from Supabase (no auth required,
+# secured instead by the WEBHOOK_SECRET header check inside the handlers)
+app.include_router(webhook_router, prefix="/api")
 
 
 if __name__ == "__main__":
