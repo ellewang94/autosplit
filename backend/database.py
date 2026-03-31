@@ -93,6 +93,8 @@ def run_migrations():
             # Transactions table — multi-currency support
             ("transactions", "currency",         "VARCHAR DEFAULT 'USD' NOT NULL"),
             ("transactions", "original_amount",  "FLOAT"),  # nullable, null = same as base
+            # Statements table — bank name for display ("Alex's Chase — Jan–Apr 2026")
+            ("statements",   "bank_name",        "VARCHAR"),
         ]
 
         for table, column, definition in new_columns:

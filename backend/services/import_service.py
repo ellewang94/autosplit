@@ -92,6 +92,9 @@ def _save_parsed_statement(
         source_hash=file_hash,
         raw_text=parsed.raw_text,
         card_holder_member_id=card_holder_member_id,
+        # Bank name comes from the parser (e.g. "Chase", "American Express")
+        # and is displayed in the UI as "Alex's Chase — Jan–Apr 2026"
+        bank_name=parsed.bank_name,
     )
     db.add(stmt)
     db.flush()

@@ -131,8 +131,8 @@ function BankInstructions({ banks, title }) {
 }
 
 // ── Multi-file drop zone ──────────────────────────────────────────────────────
-// Accepts multiple files at once — drag a whole folder's worth in one shot.
-function DropZone({ onFiles, disabled, accept, mode }) {
+// Accepts PDFs and CSVs at the same time — file type is auto-detected per file.
+function DropZone({ onFiles, disabled }) {
   const [dragging, setDragging] = useState(false)
   const inputRef = useRef()
 
@@ -140,9 +140,10 @@ function DropZone({ onFiles, disabled, accept, mode }) {
     e.preventDefault()
     setDragging(false)
     if (disabled) return
+    // Only accept .pdf and .csv files — filter out anything else dropped by accident
     const files = Array.from(e.dataTransfer.files).filter(f => {
       const ext = f.name.split('.').pop().toLowerCase()
-      return mode === 'csv' ? ext === 'csv' : ext === 'pdf'
+      return ext === 'pdf' || ext === 'csv'
     })
     if (files.length > 0) onFiles(files)
   }
@@ -159,11 +160,11 @@ function DropZone({ onFiles, disabled, accept, mode }) {
       onDrop={handleDrop}
       onClick={() => !disabled && inputRef.current?.click()}
     >
-      {/* Hidden input — multiple={true} lets you pick several files at once */}
+      {/* Hidden input — accept both PDF and CSV, multiple files at once */}
       <input
         ref={inputRef}
         type="file"
-        accept={accept}
+        accept=".pdf,.csv"
         multiple
         className="hidden"
         onChange={(e) => {
@@ -176,15 +177,13 @@ function DropZone({ onFiles, disabled, accept, mode }) {
       />
       <Upload size={32} className="text-ink-500 mx-auto mb-3" strokeWidth={1.5} />
       <p className="font-display text-lg text-ink-200 mb-1">
-        Drop {mode === 'pdf' ? 'PDFs' : 'CSVs'} here
+        Drop your statements here
       </p>
       <p className="text-sm text-ink-500">
-        or click to browse · select multiple files at once
+        or click to browse · PDF and CSV both work
       </p>
       <p className="text-xs text-ink-600 mt-2 font-mono">
-        {mode === 'pdf'
-          ? 'PDF only · Chase · Amex · Bank of America · Capital One'
-          : 'CSV only · Chase, Amex, BofA, Citi, Capital One, Discover'}
+        Chase · Amex · Bank of America · Citi · Capital One · Discover
       </p>
     </div>
   )
@@ -293,9 +292,6 @@ export default function UploadPage() {
   const navigate = useNavigate()
   const qc = useQueryClient()
 
-  // Upload mode: 'pdf' | 'csv' | null
-  const [mode, setMode] = useState(null)
-
   // The file queue — each item tracks its own state and result.
   // This replaces the old single `file` state variable.
   const [queue, setQueue] = useState([])
@@ -376,7 +372,10 @@ export default function UploadPage() {
     for (const item of pending) {
       updateItem(item.id, { status: 'uploading' })
       try {
-        const result = mode === 'csv'
+        // Auto-detect whether this is a PDF or CSV from its file extension.
+        // This replaces the old manual "what type of file?" selector.
+        const isCSV = item.file.name.toLowerCase().endsWith('.csv')
+        const result = isCSV
           ? await api.uploadCSV(groupId, item.file, item.cardHolderId || null, statementCurrency, rate)
           : await api.uploadPDF(groupId, item.file, item.cardHolderId || null, statementCurrency, rate)
         updateItem(item.id, { status: 'done', result })
@@ -384,7 +383,7 @@ export default function UploadPage() {
         // Fire analytics event so we can track upload success rate and bank distribution
         trackStatementUploaded({
           bank: result.bank_detected || 'unknown',
-          fileType: mode,
+          fileType: isCSV ? 'csv' : 'pdf',
           transactionCount: result.transaction_count ?? 0,
           needsReviewCount: result.needs_review_count ?? 0,
         })
@@ -473,7 +472,11 @@ export default function UploadPage() {
                   <CheckCircle size={13} className="text-lime-400 flex-shrink-0" />
                   <div className="flex-1 min-w-0">
                     <span className="text-sm text-ink-200 font-medium">
-                      {holder ? `${holder}'s Statement` : 'Statement'}
+                      {/* Show "Alex's Chase" if we have both; gracefully fall back */}
+                      {holder
+                        ? `${holder}'s ${s.bank_name || 'Card'}`
+                        : s.bank_name || 'Statement'
+                      }
                     </span>
                     {period && <span className="text-xs text-ink-500 ml-2">{period}</span>}
                   </div>
@@ -506,172 +509,117 @@ export default function UploadPage() {
         </div>
       )}
 
-      {/* ── Step 1: File type ─────────────────────────────────────────────────── */}
+      {/* ── Bank download instructions ────────────────────────────────────────── */}
+      {/* Collapsed by default — users who know what they're doing skip right past */}
       <div className="card mb-4">
-        <label className="label mb-3">What type of file are you uploading?</label>
-        <div className="grid grid-cols-2 gap-3">
-          <button
-            className={clsx(
-              'flex flex-col items-start gap-2 p-4 rounded-xl border-2 text-left transition-all',
-              mode === 'pdf' ? 'border-lime-400/60 bg-lime-400/5' : 'border-ink-700 hover:border-ink-500 bg-ink-800/30'
-            )}
-            onClick={() => { setMode('pdf'); resetQueue() }}
-          >
-            <div className="flex items-center gap-2">
-              <FileText size={18} className={mode === 'pdf' ? 'text-lime-400' : 'text-ink-400'} />
-              <span className={clsx('font-semibold text-sm', mode === 'pdf' ? 'text-lime-400' : 'text-ink-200')}>
-                Bank PDF
-              </span>
-            </div>
-            <p className="text-xs text-ink-500 leading-relaxed">
-              Your monthly statement PDF. Bank is auto-detected.
-            </p>
-            <span className="text-[10px] font-mono text-ink-600">Chase · Amex · Bank of America</span>
-          </button>
-
-          <button
-            className={clsx(
-              'flex flex-col items-start gap-2 p-4 rounded-xl border-2 text-left transition-all',
-              mode === 'csv' ? 'border-lime-400/60 bg-lime-400/5' : 'border-ink-700 hover:border-ink-500 bg-ink-800/30'
-            )}
-            onClick={() => { setMode('csv'); resetQueue() }}
-          >
-            <div className="flex items-center gap-2">
-              <FileSpreadsheet size={18} className={mode === 'csv' ? 'text-lime-400' : 'text-ink-400'} />
-              <span className={clsx('font-semibold text-sm', mode === 'csv' ? 'text-lime-400' : 'text-ink-200')}>
-                Bank CSV
-              </span>
-            </div>
-            <p className="text-xs text-ink-500 leading-relaxed">
-              Transaction export. Works with Amex, BofA, Citi, Capital One, Discover, Chase.
-            </p>
-            <span className="text-[10px] font-mono text-ink-600">All major banks</span>
-          </button>
+        <div className="space-y-2">
+          <BankInstructions banks={PDF_BANKS} title="How to download your statement PDF (Chase, Amex, BofA)" />
+          <BankInstructions banks={CSV_BANKS} title="How to export transaction CSV from your bank" />
         </div>
+      </div>
 
-        {mode === 'pdf' && (
-          <div className="mt-4 animate-slide-up">
-            <BankInstructions banks={PDF_BANKS} title="How to download your statement PDF" />
-          </div>
-        )}
-        {mode === 'csv' && (
-          <div className="mt-4 animate-slide-up">
-            <BankInstructions banks={CSV_BANKS} title="How to export CSV from your bank" />
+      {/* ── Currency (global for the batch) ──────────────────────────────────── */}
+      <div className="card mb-4">
+        <label className="label">What currency are these statements in?</label>
+        <p className="text-xs text-ink-500 mb-3">
+          This trip settles in <span className="text-ink-300 font-medium">{baseCurrency}</span>.
+          Applies to all files below — set once, upload many.
+        </p>
+        <select
+          className="select mb-3"
+          value={statementCurrency}
+          onChange={(e) => { setStatementCurrency(e.target.value); setExchangeRate('') }}
+          disabled={uploading}
+        >
+          {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+
+        {rateNeeded && (
+          <div className="rounded-lg bg-ink-800/60 border border-ink-700 px-4 py-3 animate-slide-up">
+            <label className="block text-xs text-ink-400 mb-2">
+              Exchange rate <span className="text-ink-600">(required)</span>
+            </label>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-ink-400">1 {statementCurrency} =</span>
+              <input
+                type="number" min="0.000001" step="any" placeholder="e.g. 0.74"
+                className="input flex-1 text-sm"
+                value={exchangeRate}
+                onChange={(e) => setExchangeRate(e.target.value)}
+                disabled={uploading}
+              />
+              <span className="text-xs text-ink-400">{baseCurrency}</span>
+            </div>
+            <p className="text-xs text-ink-600 mt-2">
+              Google "{statementCurrency} to {baseCurrency}" for the current rate.
+            </p>
           </div>
         )}
       </div>
 
-      {/* ── Step 2: Currency (global for the batch) ──────────────────────────── */}
-      {mode && (
-        <div className="card mb-4">
-          <label className="label">What currency are these statements in?</label>
-          <p className="text-xs text-ink-500 mb-3">
-            This trip settles in <span className="text-ink-300 font-medium">{baseCurrency}</span>.
-            Applies to all files below — set once, upload many.
-          </p>
-          <select
-            className="select mb-3"
-            value={statementCurrency}
-            onChange={(e) => { setStatementCurrency(e.target.value); setExchangeRate('') }}
-            disabled={uploading}
-          >
-            {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
-          </select>
+      {/* ── Drop zone + queue ─────────────────────────────────────────────────── */}
+      <div className="card mb-4">
+        <label className="label mb-3">
+          {queue.length === 0 ? 'Drop your statements here' : `${queue.length} file${queue.length !== 1 ? 's' : ''} queued`}
+        </label>
 
-          {rateNeeded && (
-            <div className="rounded-lg bg-ink-800/60 border border-ink-700 px-4 py-3 animate-slide-up">
-              <label className="block text-xs text-ink-400 mb-2">
-                Exchange rate <span className="text-ink-600">(required)</span>
-              </label>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-ink-400">1 {statementCurrency} =</span>
-                <input
-                  type="number" min="0.000001" step="any" placeholder="e.g. 0.74"
-                  className="input flex-1 text-sm"
-                  value={exchangeRate}
-                  onChange={(e) => setExchangeRate(e.target.value)}
-                  disabled={uploading}
-                />
-                <span className="text-xs text-ink-400">{baseCurrency}</span>
-              </div>
-              <p className="text-xs text-ink-600 mt-2">
-                Google "{statementCurrency} to {baseCurrency}" for the current rate.
-              </p>
+        {/* Drop zone — accepts both PDF and CSV, type is auto-detected per file */}
+        <DropZone
+          onFiles={addFiles}
+          disabled={uploading}
+        />
+
+        {/* File queue */}
+        {queue.length > 0 && (
+          <div className="mt-4 space-y-3">
+            {queue.map((item) => (
+              <QueueCard
+                key={item.id}
+                item={item}
+                members={members}
+                onRemove={() => removeItem(item.id)}
+                onSetCardHolder={(v) => setCardHolder(item.id, v)}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* Summary after all done */}
+        {allFinished && (
+          <div className="mt-4 pt-4 border-t border-ink-700 animate-slide-up">
+            <div className="flex items-center gap-3 mb-3">
+              {successCount > 0 && (
+                <span className="text-sm text-lime-400 font-medium flex items-center gap-1.5">
+                  <CheckCircle size={14} />
+                  {successCount} imported
+                </span>
+              )}
+              {errorCount > 0 && (
+                <span className="text-sm text-red-400 font-medium flex items-center gap-1.5">
+                  <AlertTriangle size={14} />
+                  {errorCount} failed
+                </span>
+              )}
             </div>
-          )}
-        </div>
-      )}
-
-      {/* ── Step 3: Drop zone + queue ─────────────────────────────────────────── */}
-      {mode && (
-        <div className="card mb-4">
-          <label className="label mb-3">
-            {queue.length === 0
-              ? (mode === 'pdf' ? 'Drop your statement PDFs' : 'Drop your transaction CSVs')
-              : `${queue.length} file${queue.length !== 1 ? 's' : ''} queued`
-            }
-          </label>
-
-          {/* Drop zone — always visible so user can keep adding more files */}
-          <DropZone
-            onFiles={addFiles}
-            disabled={uploading}
-            accept={mode === 'pdf' ? '.pdf' : '.csv'}
-            mode={mode}
-          />
-
-          {/* File queue */}
-          {queue.length > 0 && (
-            <div className="mt-4 space-y-3">
-              {queue.map((item) => (
-                <QueueCard
-                  key={item.id}
-                  item={item}
-                  members={members}
-                  onRemove={() => removeItem(item.id)}
-                  onSetCardHolder={(v) => setCardHolder(item.id, v)}
-                />
-              ))}
+            <div className="flex gap-2">
+              <button
+                className="btn-primary flex-1 justify-center"
+                onClick={() => navigate(`/groups/${groupId}/transactions`)}
+              >
+                Review Transactions
+                <ArrowRight size={14} />
+              </button>
+              <button className="btn-secondary" onClick={resetQueue}>
+                Upload More
+              </button>
             </div>
-          )}
-
-          {/* Summary after all done */}
-          {allFinished && (
-            <div className="mt-4 pt-4 border-t border-ink-700 animate-slide-up">
-              <div className="flex items-center gap-3 mb-3">
-                {successCount > 0 && (
-                  <span className="text-sm text-lime-400 font-medium flex items-center gap-1.5">
-                    <CheckCircle size={14} />
-                    {successCount} imported
-                  </span>
-                )}
-                {errorCount > 0 && (
-                  <span className="text-sm text-red-400 font-medium flex items-center gap-1.5">
-                    <AlertTriangle size={14} />
-                    {errorCount} failed
-                  </span>
-                )}
-              </div>
-              <div className="flex gap-2">
-                <button
-                  className="btn-primary flex-1 justify-center"
-                  onClick={() => navigate(`/groups/${groupId}/transactions`)}
-                >
-                  Review Transactions
-                  <ArrowRight size={14} />
-                </button>
-                <button className="btn-secondary" onClick={resetQueue}>
-                  Upload More
-                </button>
-              </div>
-              {anySucceeded && <ImportFeedback groupId={groupId} />}
-            </div>
-          )}
-        </div>
-      )}
+            {anySucceeded && <ImportFeedback groupId={groupId} />}
+          </div>
+        )}
+      </div>
 
       {/* ── Upload button ─────────────────────────────────────────────────────── */}
-      {mode && hasPending && !allFinished && (
+      {hasPending && !allFinished && (
         <button
           className="btn-primary w-full justify-center py-3"
           onClick={uploadAll}

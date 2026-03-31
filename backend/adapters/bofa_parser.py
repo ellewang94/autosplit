@@ -207,4 +207,5 @@ def parse_bofa_pdf(file_bytes: bytes) -> ParsedStatement:
         period_end=period_end.isoformat(),
         transactions=transactions,
         raw_text=full_text,
+        bank_name="Bank of America",
     )

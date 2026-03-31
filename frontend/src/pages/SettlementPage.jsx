@@ -4,9 +4,9 @@ import { useQuery, useMutation } from '@tanstack/react-query'
 import { api } from '../api/client'
 import { trackSettlementComputed, trackShareCreated } from '../lib/analytics'
 import {
-  TrendingUp, ArrowRight, Download, Copy, CheckCircle,
+  TrendingUp, ArrowRight, Copy, CheckCircle,
   Users, DollarSign, AlertTriangle, ChevronDown, Loader,
-  CreditCard, Check, ExternalLink, Link2, Link2Off, Eye,
+  CreditCard, Check, ExternalLink, Link2, Link2Off,
   ThumbsUp, ThumbsDown, Send,
 } from 'lucide-react'
 import clsx from 'clsx'
@@ -327,15 +327,23 @@ function CardHoldersSummary({ statements, members, groupId }) {
 
             {/* Card info */}
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className={clsx(
                   'text-sm font-medium',
                   holderName ? 'text-ink-100' : 'text-amber-400'
                 )}>
-                  {holderName || 'No card holder set'}
+                  {/* Show "Alex's Chase" if we have both, fall back gracefully */}
+                  {holderName
+                    ? `${holderName}'s ${stmt.bank_name || 'Card'}`
+                    : stmt.bank_name || 'No card holder set'
+                  }
                 </span>
-                <span className="text-xs text-ink-500">·</span>
-                <span className="text-xs text-ink-500 font-mono truncate">{period}</span>
+                {period && (
+                  <>
+                    <span className="text-xs text-ink-500">·</span>
+                    <span className="text-xs text-ink-500 font-mono truncate">{period}</span>
+                  </>
+                )}
               </div>
               <div className="text-xs text-ink-600 mt-0.5">
                 {stmt.transaction_count} transaction{stmt.transaction_count !== 1 ? 's' : ''}
@@ -716,23 +724,8 @@ export default function SettlementPage() {
             </div>
           </div>
 
-          {/* Export + Share buttons */}
+          {/* Share trip — generates a public read-only link anyone can open */}
           <div className="flex flex-wrap items-center gap-2 mb-6">
-            <button
-              className="btn-secondary text-xs"
-              onClick={() => api.exportCSV(groupId, effectivePayerId, statementId ? parseInt(statementId) : null)}
-            >
-              <Download size={12} />
-              Export CSV
-            </button>
-            <button
-              className="btn-secondary text-xs"
-              onClick={() => api.exportJSON(groupId, effectivePayerId, statementId ? parseInt(statementId) : null)}
-            >
-              <Download size={12} />
-              Export JSON
-            </button>
-            {/* Share trip — generates a public read-only link anyone can open */}
             <SharePanel groupId={groupId} effectivePayerId={effectivePayerId} />
           </div>
 

@@ -46,6 +46,8 @@ class ParsedStatement:
     period_end: Optional[str]      # ISO format or None
     transactions: List[ParsedTransaction] = field(default_factory=list)
     raw_text: str = ""
+    # Which bank issued this statement — shown in the UI as "Alex's Chase — Jan–Apr 2026"
+    bank_name: Optional[str] = None
 
 
 # ─── Date Helpers ─────────────────────────────────────────────────────────────
@@ -398,4 +400,5 @@ def parse_chase_pdf(file_bytes: bytes) -> ParsedStatement:
         period_end=period_end.isoformat() if period_end else None,
         transactions=merged,
         raw_text=full_text,
+        bank_name="Chase",
     )

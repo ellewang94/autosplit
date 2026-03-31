@@ -64,6 +64,9 @@ class StatementResponse(BaseModel):
     # expenses. These are not real uploaded files and should be hidden from the
     # statement list and settlement config UI.
     is_manual: bool = False
+    # Which bank issued this statement — used for display in the UI.
+    # Null for statements imported before this field was added.
+    bank_name: Optional[str] = None
 
 
 # ─── Transactions ─────────────────────────────────────────────────────────────

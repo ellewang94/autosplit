@@ -458,4 +458,5 @@ def parse_bank_csv(file_bytes: bytes) -> ParsedStatement:
         period_end=period_end,
         transactions=transactions,
         raw_text=f"CSV import ({fmt['bank']}, {len(transactions)} transactions)",
+        bank_name=fmt["bank"],      # e.g. "Chase", "American Express", "Citi"
     )

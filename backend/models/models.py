@@ -87,6 +87,9 @@ class Statement(Base):
     uploaded_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     # Which member is the card holder (paid the bill)
     card_holder_member_id = Column(Integer, ForeignKey("members.id"), nullable=True)
+    # Which bank issued this statement — e.g. "Chase", "American Express", "Bank of America"
+    # Null for statements imported before this column was added (legacy).
+    bank_name = Column(String, nullable=True)
 
     group = relationship("Group", back_populates="statements")
     transactions = relationship("Transaction", back_populates="statement", cascade="all, delete-orphan")
