@@ -5,7 +5,7 @@ import { api } from '../api/client'
 import {
   Upload, List, TrendingUp, CheckCircle, AlertTriangle,
   Calendar, Users, ArrowRight, FileText, ChevronRight, Trash2,
-  Link2, Loader, Plus,
+  Link2, Loader, Plus, Pencil, X,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useAuth } from '../contexts/AuthContext'
@@ -144,6 +144,25 @@ export default function TripOverviewPage() {
   const [inviteCopied, setInviteCopied] = useState(false)
   const [inviteLoading, setInviteLoading] = useState(false)
 
+  // ── Inline date editor ────────────────────────────────────────────────────
+  const [editingDates, setEditingDates] = useState(false)
+  const [editStart, setEditStart] = useState('')
+  const [editEnd, setEditEnd] = useState('')
+
+  const updateDates = useMutation({
+    mutationFn: () => api.updateGroup(groupId, group.name, editStart || null, editEnd || null),
+    onSuccess: () => {
+      qc.invalidateQueries(['group', groupId])
+      setEditingDates(false)
+    },
+  })
+
+  function openDateEditor() {
+    setEditStart(group?.start_date || '')
+    setEditEnd(group?.end_date || '')
+    setEditingDates(true)
+  }
+
   if (loadingGroup) {
     return <div className="text-ink-500 animate-pulse-soft text-sm">Loading…</div>
   }
@@ -208,11 +227,52 @@ export default function TripOverviewPage() {
         <h1 className="font-display text-3xl font-bold text-ink-50 mb-1">{group?.name}</h1>
 
         <div className="flex items-center gap-4 mt-2 flex-wrap">
-          {/* Date range */}
-          {group?.start_date && group?.end_date && (
-            <div className="flex items-center gap-1.5 text-sm text-ink-400">
+          {/* Date range — click pencil to edit inline */}
+          {editingDates ? (
+            <div className="flex items-center gap-2 flex-wrap">
+              <Calendar size={13} className="text-ink-500 flex-shrink-0" />
+              <input
+                type="date"
+                className="input text-sm py-1 px-2 w-36"
+                value={editStart}
+                onChange={e => setEditStart(e.target.value)}
+              />
+              <span className="text-ink-500 text-xs">–</span>
+              <input
+                type="date"
+                className="input text-sm py-1 px-2 w-36"
+                value={editEnd}
+                onChange={e => setEditEnd(e.target.value)}
+              />
+              <button
+                className="btn-primary text-xs py-1 px-3"
+                onClick={() => updateDates.mutate()}
+                disabled={updateDates.isPending}
+              >
+                {updateDates.isPending ? <Loader size={11} className="animate-spin" /> : 'Save'}
+              </button>
+              <button
+                className="text-ink-500 hover:text-ink-300 transition-colors"
+                onClick={() => setEditingDates(false)}
+              >
+                <X size={13} />
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 text-sm text-ink-400 group/dates">
               <Calendar size={13} className="text-ink-500" />
-              {formatDateShort(group.start_date)} – {formatDate(group.end_date)}
+              {group?.start_date && group?.end_date
+                ? `${formatDateShort(group.start_date)} – ${formatDate(group.end_date)}`
+                : <span className="text-ink-600 italic">No dates set</span>
+              }
+              {/* Edit button — visible on hover */}
+              <button
+                onClick={openDateEditor}
+                className="ml-1 text-ink-600 hover:text-ink-300 transition-colors opacity-0 group-hover/dates:opacity-100"
+                title="Edit trip dates"
+              >
+                <Pencil size={11} />
+              </button>
             </div>
           )}
 
@@ -415,13 +475,17 @@ export default function TripOverviewPage() {
                     </div>
                   )}
 
-                  {/* Statement info — clicking navigates to transactions */}
+                  {/* Statement info — click to filter transactions to just this statement */}
                   <div
                     className="flex-1 min-w-0 cursor-pointer"
-                    onClick={() => navigate(`/groups/${groupId}/transactions`)}
+                    onClick={() => navigate(`/groups/${groupId}/transactions?statement=${s.id}`)}
+                    title="View this statement's transactions"
                   >
                     <div className="text-sm text-ink-200 font-medium">
-                      {holder ? `${holder}'s Card` : 'Statement'}
+                      {holder
+                        ? `${holder}'s ${s.bank_name || 'Card'}`
+                        : s.bank_name || 'Statement'
+                      }
                       {!holder && (
                         <span className="ml-2 text-[10px] text-amber-400 font-normal">no card holder set</span>
                       )}

@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
-import { useParams, useNavigate, useLocation } from 'react-router-dom'
+import { useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 import {
@@ -1166,6 +1166,13 @@ export default function TransactionsPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const qc = useQueryClient()
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  // Statement filter — set when user clicks a statement row in TripOverviewPage.
+  // Stored in the URL (?statement=123) so it survives refresh and can be shared.
+  const statementIdFilter = searchParams.get('statement')
+    ? parseInt(searchParams.get('statement'))
+    : null
 
   // Which rows are checked (main table bulk selection)
   const [selectedIds, setSelectedIds] = useState(new Set())
@@ -1356,10 +1363,12 @@ export default function TransactionsPage() {
       if (searchQuery && !t.description_raw.toLowerCase().includes(searchQuery.toLowerCase())) return false
       if (dateFrom && t.posted_date < dateFrom) return false
       if (dateTo && t.posted_date > dateTo) return false
+      // Statement filter — set via ?statement=123 URL param when user clicks a statement row
+      if (statementIdFilter && t.statement_id !== statementIdFilter) return false
 
       return true
     })
-  }, [transactions, filter, categoryFilter, searchQuery, dateFrom, dateTo])
+  }, [transactions, filter, categoryFilter, searchQuery, dateFrom, dateTo, statementIdFilter])
 
   // ── Selection helpers ─────────────────────────────────────────────────────
 
@@ -1443,6 +1452,31 @@ export default function TransactionsPage() {
           </button>
         </div>
       </div>
+
+      {/* ── Statement filter banner — shown when user clicked a statement row ── */}
+      {statementIdFilter && (() => {
+        const stmt = statements.find(s => s.id === statementIdFilter)
+        if (!stmt) return null
+        const members = group?.members || []
+        const holder = stmt.card_holder_member_id
+          ? members.find(m => m.id === stmt.card_holder_member_id)?.name
+          : null
+        const label = holder
+          ? `${holder}'s ${stmt.bank_name || 'Card'}`
+          : stmt.bank_name || 'Statement'
+        return (
+          <div className="mb-4 flex items-center gap-2 px-3 py-2 bg-lime-400/8 border border-lime-400/25 rounded-lg">
+            <span className="text-xs text-lime-400">Showing transactions from</span>
+            <span className="text-xs font-semibold text-lime-300">{label}</span>
+            <button
+              className="ml-auto text-xs text-ink-500 hover:text-ink-300 transition-colors flex items-center gap-1"
+              onClick={() => setSearchParams({})}
+            >
+              <X size={11} /> Clear filter
+            </button>
+          </div>
+        )
+      })()}
 
       {/* ── Stats row ──────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
@@ -1587,86 +1621,7 @@ export default function TransactionsPage() {
         </div>
       )}
 
-      {/* ── Bulk action toolbar (visible when anything is selected) ────────── */}
-      {selectedIds.size > 0 && (
-        <div className="flex items-center gap-2 mb-3 px-3 py-2 bg-ink-800 border border-lime-400/20 rounded-lg flex-wrap">
-          <span className="text-xs font-mono text-lime-400 font-semibold">
-            {selectedIds.size} selected
-          </span>
-          <span className="text-ink-700 mx-0.5">·</span>
-
-          {/* Set Category dropdown */}
-          <select
-            className="select text-xs py-1 px-2 h-7 w-auto"
-            value=""
-            onChange={(e) => {
-              if (!e.target.value) return
-              bulkUpdate.mutate({ transaction_ids: [...selectedIds], category: e.target.value })
-            }}
-          >
-            <option value="" disabled>Set Category</option>
-            {CATEGORIES.map(c => (
-              <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>
-            ))}
-          </select>
-
-          {/* Set Participants button + popover */}
-          <div className="relative">
-            <button
-              className="btn-ghost text-xs py-1 px-2.5 h-7 flex items-center gap-1.5"
-              onClick={() => setShowParticipantsPopover(p => !p)}
-            >
-              <Users size={11} />
-              Set Participants
-              <ChevronDown size={9} />
-            </button>
-            {showParticipantsPopover && (
-              <ParticipantsPopover
-                members={members}
-                onApply={(participants) => {
-                  bulkUpdate.mutate({
-                    transaction_ids: [...selectedIds],
-                    participants_json: participants,
-                  })
-                  setShowParticipantsPopover(false)
-                }}
-                onClose={() => setShowParticipantsPopover(false)}
-              />
-            )}
-          </div>
-
-          {/* Status action buttons */}
-          <button
-            className="btn-ghost text-xs py-1 px-2.5 h-7 flex items-center gap-1.5 text-green-400 hover:bg-green-400/10"
-            onClick={() => bulkUpdate.mutate({ transaction_ids: [...selectedIds], status: 'confirmed' })}
-            title="Mark as reviewed & confirmed"
-          >
-            <Check size={11} /> Confirm
-          </button>
-          <button
-            className="btn-ghost text-xs py-1 px-2.5 h-7 flex items-center gap-1.5 text-red-400 hover:bg-red-400/10"
-            onClick={() => bulkUpdate.mutate({ transaction_ids: [...selectedIds], status: 'excluded' })}
-            title="Exclude from settlement"
-          >
-            <X size={11} /> Exclude
-          </button>
-          <button
-            className="btn-ghost text-xs py-1 px-2.5 h-7 text-ink-400"
-            onClick={() => bulkUpdate.mutate({ transaction_ids: [...selectedIds], status: 'unreviewed' })}
-            title="Undo exclude — mark as unreviewed"
-          >
-            Include
-          </button>
-
-          {/* Clear selection */}
-          <button
-            className="btn-ghost text-xs py-1 px-2 h-7 text-ink-600 hover:text-ink-400 ml-auto"
-            onClick={() => setSelectedIds(new Set())}
-          >
-            Clear
-          </button>
-        </div>
-      )}
+      {/* Bulk action bar moved to sticky bottom — see end of return */}
 
       {/* ── Pre-trip bookings callout (Excluded tab only) ──────────────────── */}
       {/*
@@ -2072,6 +2027,96 @@ export default function TransactionsPage() {
           group={group}   // needed so the modal knows the group's base currency
           onClose={() => setShowAddExpense(false)}
         />
+      )}
+
+      {/* ── Sticky bulk action bar ─────────────────────────────────────────────
+          Floats at the bottom of the viewport when rows are selected.
+          Fixed positioning avoids the page-jump that happened when the bar
+          appeared inline and pushed content down. z-40 sits below modals (z-50). */}
+      {selectedIds.size > 0 && (
+        <div className="fixed bottom-0 left-0 right-0 z-40 flex justify-center pointer-events-none">
+          <div className="pointer-events-auto mb-4 mx-4 w-full max-w-3xl flex items-center gap-2 px-4 py-2.5
+                          bg-ink-800/95 backdrop-blur-sm border border-lime-400/25 rounded-2xl shadow-2xl
+                          shadow-black/40 flex-wrap animate-slide-up">
+            <span className="text-xs font-mono text-lime-400 font-semibold">
+              {selectedIds.size} selected
+            </span>
+            <span className="text-ink-700 mx-0.5">·</span>
+
+            {/* Set Category dropdown */}
+            <select
+              className="select text-xs py-1 px-2 h-7 w-auto"
+              value=""
+              onChange={(e) => {
+                if (!e.target.value) return
+                bulkUpdate.mutate({ transaction_ids: [...selectedIds], category: e.target.value })
+              }}
+            >
+              <option value="" disabled>Set Category</option>
+              {CATEGORIES.map(c => (
+                <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>
+              ))}
+            </select>
+
+            {/* Set Participants button + popover — popover opens upward from the bottom bar */}
+            <div className="relative">
+              <button
+                className="btn-ghost text-xs py-1 px-2.5 h-7 flex items-center gap-1.5"
+                onClick={() => setShowParticipantsPopover(p => !p)}
+              >
+                <Users size={11} />
+                Set Participants
+                <ChevronDown size={9} />
+              </button>
+              {showParticipantsPopover && (
+                <div className="absolute bottom-full mb-2 left-0">
+                  <ParticipantsPopover
+                    members={members}
+                    onApply={(participants) => {
+                      bulkUpdate.mutate({
+                        transaction_ids: [...selectedIds],
+                        participants_json: participants,
+                      })
+                      setShowParticipantsPopover(false)
+                    }}
+                    onClose={() => setShowParticipantsPopover(false)}
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Status action buttons */}
+            <button
+              className="btn-ghost text-xs py-1 px-2.5 h-7 flex items-center gap-1.5 text-green-400 hover:bg-green-400/10"
+              onClick={() => bulkUpdate.mutate({ transaction_ids: [...selectedIds], status: 'confirmed' })}
+              title="Mark as reviewed & confirmed"
+            >
+              <Check size={11} /> Confirm
+            </button>
+            <button
+              className="btn-ghost text-xs py-1 px-2.5 h-7 flex items-center gap-1.5 text-red-400 hover:bg-red-400/10"
+              onClick={() => bulkUpdate.mutate({ transaction_ids: [...selectedIds], status: 'excluded' })}
+              title="Exclude from settlement"
+            >
+              <X size={11} /> Exclude
+            </button>
+            <button
+              className="btn-ghost text-xs py-1 px-2.5 h-7 text-ink-400"
+              onClick={() => bulkUpdate.mutate({ transaction_ids: [...selectedIds], status: 'unreviewed' })}
+              title="Undo exclude — mark as unreviewed"
+            >
+              Include
+            </button>
+
+            {/* Clear selection */}
+            <button
+              className="btn-ghost text-xs py-1 px-2 h-7 text-ink-600 hover:text-ink-400 ml-auto"
+              onClick={() => setSelectedIds(new Set())}
+            >
+              Clear
+            </button>
+          </div>
+        </div>
       )}
     </div>
   )
