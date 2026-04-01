@@ -363,6 +363,74 @@ export default function TripOverviewPage() {
         </div>
       )}
 
+      {/* ── Contextual next-step banner ───────────────────────────────────────
+          Shows ONE clear "do this now" prompt based on where the user is in the
+          workflow. Disappears once they've completed all steps and settled up.
+          Priority order: no members > no statements > needs review > settle up.
+      ─────────────────────────────────────────────────────────────────────── */}
+      {(() => {
+        // Determine what the most important next action is right now
+        if (members.length === 0) {
+          return (
+            <div className="mb-6 flex items-center gap-3 px-4 py-3 rounded-xl bg-lime-400/8 border border-lime-400/20 animate-slide-up">
+              <Users size={15} className="text-lime-400 flex-shrink-0" />
+              <div className="flex-1">
+                <span className="text-sm font-medium text-ink-100">Add your travel companions</span>
+                <span className="text-xs text-ink-400 ml-2">so AutoSplit knows who's splitting each expense</span>
+              </div>
+            </div>
+          )
+        }
+        if (!hasStatements) {
+          return (
+            <div
+              className="mb-6 flex items-center gap-3 px-4 py-3 rounded-xl bg-lime-400/8 border border-lime-400/20 animate-slide-up cursor-pointer hover:bg-lime-400/12 transition-colors"
+              onClick={() => navigate(`/groups/${groupId}/upload`)}
+            >
+              <Upload size={15} className="text-lime-400 flex-shrink-0" />
+              <div className="flex-1">
+                <span className="text-sm font-medium text-ink-100">Upload your first statement</span>
+                <span className="text-xs text-ink-400 ml-2">PDF or CSV from any major bank</span>
+              </div>
+              <ChevronRight size={14} className="text-ink-500 flex-shrink-0" />
+            </div>
+          )
+        }
+        if (needsReview.length > 0) {
+          return (
+            <div
+              className="mb-6 flex items-center gap-3 px-4 py-3 rounded-xl bg-amber-400/8 border border-amber-400/20 animate-slide-up cursor-pointer hover:bg-amber-400/12 transition-colors"
+              onClick={() => navigate(`/groups/${groupId}/transactions`)}
+            >
+              <AlertTriangle size={15} className="text-amber-400 flex-shrink-0" />
+              <div className="flex-1">
+                <span className="text-sm font-medium text-ink-100">
+                  {needsReview.length} transaction{needsReview.length > 1 ? 's' : ''} need participant assignment
+                </span>
+                <span className="text-xs text-ink-400 ml-2">decide who splits each expense</span>
+              </div>
+              <ChevronRight size={14} className="text-ink-500 flex-shrink-0" />
+            </div>
+          )
+        }
+        if (hasTransactions) {
+          return (
+            <div
+              className="mb-6 flex items-center gap-3 px-4 py-3 rounded-xl bg-lime-400/8 border border-lime-400/20 animate-slide-up cursor-pointer hover:bg-lime-400/12 transition-colors"
+              onClick={() => navigate(`/groups/${groupId}/settlement`)}
+            >
+              <TrendingUp size={15} className="text-lime-400 flex-shrink-0" />
+              <div className="flex-1">
+                <span className="text-sm font-medium text-ink-100">Ready to settle up</span>
+                <span className="text-xs text-ink-400 ml-2">compute who owes whom</span>
+              </div>
+              <ChevronRight size={14} className="text-ink-500 flex-shrink-0" />
+            </div>
+          )
+        }
+        return null
+      })()}
+
       {/* ── Workflow steps ────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-8">
         <WorkflowCard

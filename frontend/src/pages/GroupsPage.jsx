@@ -43,8 +43,10 @@ function MemberAvatar({ name, index }) {
   )
 }
 
-function AddMemberInline({ groupId, onDone }) {
-  const [name, setName] = useState('')
+function AddMemberInline({ groupId, onDone, prefill = '' }) {
+  // Pre-fill with the caller's suggestion (typically the user's own display name
+  // when they're adding themselves as the first member of a new trip).
+  const [name, setName] = useState(prefill)
   const qc = useQueryClient()
 
   const mut = useMutation({
@@ -156,7 +158,12 @@ function GroupCard({ group }) {
 
       {/* Add member */}
       {addingMember ? (
-        <AddMemberInline groupId={group.id} onDone={() => setAddingMember(false)} />
+        <AddMemberInline
+          groupId={group.id}
+          onDone={() => setAddingMember(false)}
+          // When no members yet, suggest the user's own name (from onboarding capture)
+          prefill={group.members.length === 0 ? (localStorage.getItem('autosplit_display_name') || '') : ''}
+        />
       ) : (
         <button
           className="btn-ghost w-full justify-center py-2 border border-dashed border-ink-700"
