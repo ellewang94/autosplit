@@ -1601,6 +1601,29 @@ export default function TransactionsPage() {
         </div>
       </div>
 
+      {/* ── Pre-trip bookings notice ────────────────────────────────────────────
+          Shown on all tabs except Excluded, whenever there are probable pre-trip
+          bookings sitting in the excluded pile. This is the key surfacing moment —
+          without it, users would never know these transactions exist.
+      ─────────────────────────────────────────────────────────────────────── */}
+      {filter !== 'excluded' && probablePreTripBookings.length > 0 && (
+        <div className="flex items-center gap-2.5 mb-3 px-3 py-2.5 rounded-lg bg-amber-400/5 border border-amber-400/20 animate-slide-up">
+          <Plane size={13} className="text-amber-400 flex-shrink-0" />
+          <p className="text-xs text-ink-300">
+            <span className="text-amber-400 font-semibold">
+              {probablePreTripBookings.length} booking{probablePreTripBookings.length !== 1 ? 's' : ''} before your trip dates
+            </span>
+            {' '}(flights, hotels, etc.) were auto-excluded — they may still be trip expenses.
+          </p>
+          <button
+            className="ml-auto flex-shrink-0 text-xs text-amber-400 hover:text-amber-300 font-medium transition-colors"
+            onClick={() => setFilter('excluded')}
+          >
+            Review →
+          </button>
+        </div>
+      )}
+
       {/* ── "Needs Review" helper tip ────────────────────────────────────────
           Only shown when on the needs-review filter with items present and
           nothing selected yet. Teaches the batch workflow so users don't
