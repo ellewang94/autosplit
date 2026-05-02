@@ -320,7 +320,7 @@ function CreateGroupForm({ onDone }) {
           Trip dates <span className="text-ink-600">(optional)</span>
         </label>
         <p className="text-xs text-ink-500 mb-2">
-          Transactions outside these dates will be <strong className="text-amber-400/90">auto-excluded</strong> from settlement — useful for filtering out everyday spending that snuck onto your trip card.
+          Everyday spending outside these dates is <strong className="text-amber-400/90">auto-excluded</strong>. Flights, hotels, and Airbnbs booked up to 90 days before are <strong className="text-lime-400/90">flagged for review</strong> — so pre-trip bookings don't disappear.
         </p>
         <div className="flex gap-2">
           <input

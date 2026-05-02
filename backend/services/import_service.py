@@ -12,6 +12,7 @@ Keeping this separate from the API routes means we can test it without HTTP.
 
 import hashlib
 import io
+from datetime import date, timedelta
 from sqlalchemy.orm import Session
 from typing import Optional
 
@@ -196,20 +197,85 @@ def _save_parsed_statement(
         saved_count += 1
 
     # ── Apply trip date range filtering ───────────────────────────────────────
+    # The naive approach — exclude everything outside the dates — breaks real trips
+    # because flights, hotels, and Airbnbs are booked weeks or months BEFORE the trip.
+    # So we use a smarter two-tier approach:
+    #
+    #   Tier 1 — "trip-likely" categories (travel, transportation) within a
+    #            90-day pre-trip window or 14-day post-trip window:
+    #            → Surface for review ("Needs Review") so the user can decide.
+    #              These are almost certainly real trip expenses.
+    #
+    #   Tier 2 — Everything else outside the dates:
+    #            → Auto-exclude. Everyday groceries, subscriptions, gym charges
+    #              on a trip card are noise, not trip expenses.
+    #
+    # Think of it like: we don't throw away mail that says "Flight Confirmation"
+    # just because it arrived before you left for the airport.
     db.flush()
 
+    # Categories that commonly have pre-trip bookings (flights, hotels, Airbnb, etc.)
+    TRIP_LIKELY_CATEGORIES = {"travel", "transportation"}
+
+    # How far before the trip start to look for pre-booked travel charges
+    PRE_TRIP_LOOKBACK_DAYS = 90
+
+    # How far after trip end to catch any delayed charges or refunds
+    POST_TRIP_LOOKAHEAD_DAYS = 14
+
     excluded_by_date_count = 0
-    # `group` was already fetched above for currency — reuse it here
+    surfaced_pre_trip_count = 0
+
     if group and group.start_date and group.end_date:
+        trip_start = date.fromisoformat(group.start_date)
+        trip_end   = date.fromisoformat(group.end_date)
+        # Pre-trip window: up to 90 days before the trip starts
+        pre_trip_cutoff = trip_start - timedelta(days=PRE_TRIP_LOOKBACK_DAYS)
+        # Post-trip window: up to 14 days after the trip ends
+        post_trip_cutoff = trip_end + timedelta(days=POST_TRIP_LOOKAHEAD_DAYS)
+
         new_txns = db.query(Transaction).filter_by(statement_id=stmt.id).all()
         for txn in new_txns:
-            if txn.posted_date < group.start_date or txn.posted_date > group.end_date:
+            # Parse the transaction date for comparison
+            try:
+                txn_date = date.fromisoformat(txn.posted_date)
+            except (ValueError, TypeError):
+                # Unparseable date — exclude to be safe
+                txn.status = "excluded"
+                excluded_by_date_count += 1
+                continue
+
+            # Transaction is within the trip dates — nothing to do
+            if trip_start <= txn_date <= trip_end:
+                continue
+
+            # Transaction is outside trip dates — decide based on category
+            category = txn.category or "unknown"
+            in_pre_trip_window  = pre_trip_cutoff  <= txn_date < trip_start
+            in_post_trip_window = trip_end < txn_date <= post_trip_cutoff
+
+            if category in TRIP_LIKELY_CATEGORIES and (in_pre_trip_window or in_post_trip_window):
+                # Likely a pre-booked flight, hotel, or Airbnb — surface it for review.
+                # Force participant type to "ask" so it shows up in "Needs Review"
+                # and the user consciously decides whether to include it.
+                #
+                # IMPORTANT: We create a NEW dict here (not mutate the existing one).
+                # SQLAlchemy's JSON column doesn't detect in-place mutations —
+                # you must replace the field with a new object for the change to be saved.
+                existing = txn.participants_json or {}
+                txn.participants_json = {**existing, "type": "ask"}
+                txn.status = "unreviewed"
+                surfaced_pre_trip_count += 1
+            else:
+                # Everyday spending outside trip dates — exclude
                 txn.status = "excluded"
                 excluded_by_date_count += 1
 
     db.commit()
 
     msg = f"Imported {saved_count} transactions. {needs_review_count} need review."
+    if surfaced_pre_trip_count:
+        msg += f" {surfaced_pre_trip_count} pre/post-trip travel charges flagged for review."
     if excluded_by_date_count:
         msg += f" {excluded_by_date_count} outside trip dates were auto-excluded."
 
