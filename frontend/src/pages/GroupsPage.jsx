@@ -312,29 +312,49 @@ function CreateGroupForm({ onDone }) {
         </select>
       </div>
 
-      {/* Optional trip date range */}
+      {/* Optional trip date range.
+          Mobile: stack vertically with explicit "Start" / "End" labels — the
+          previous side-by-side layout overflowed the card because iOS Safari
+          renders date inputs at the 16px-floor we enforce globally to stop
+          focus-zoom. Above sm we go back to side-by-side with a dash. */}
       <div className="mb-4">
         <label className="block text-xs text-ink-400 mb-1.5 flex items-center gap-1.5">
           <Calendar size={11} />
           Trip dates <span className="text-ink-600">(optional)</span>
         </label>
-        <p className="text-xs text-ink-500 mb-2">
+        <p className="text-xs text-ink-500 mb-3">
           Everyday spending outside these dates is <strong className="text-amber-400/90">auto-excluded</strong>. Flights, hotels, and Airbnbs booked up to 90 days before are <strong className="text-lime-400/90">flagged for review</strong> — so pre-trip bookings don't disappear.
         </p>
-        <div className="flex gap-2">
-          <input
-            type="date"
-            className="input flex-1 text-sm"
-            value={startDate}
-            onChange={(e) => setStartDate(e.target.value)}
-          />
-          <span className="text-ink-500 self-center text-sm">–</span>
-          <input
-            type="date"
-            className="input flex-1 text-sm"
-            value={endDate}
-            onChange={(e) => setEndDate(e.target.value)}
-          />
+
+        {/* Mobile-first: stacked. sm+ : inline two-up with a dash. */}
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+          <div className="flex-1 min-w-0">
+            <span className="block text-[10px] text-ink-500 uppercase tracking-widest mb-1 sm:hidden">
+              Start
+            </span>
+            <input
+              type="date"
+              className="input w-full text-sm [color-scheme:dark]"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              max={endDate || undefined}
+              aria-label="Trip start date"
+            />
+          </div>
+          <span className="hidden sm:inline text-ink-500 text-sm shrink-0">–</span>
+          <div className="flex-1 min-w-0">
+            <span className="block text-[10px] text-ink-500 uppercase tracking-widest mb-1 sm:hidden">
+              End
+            </span>
+            <input
+              type="date"
+              className="input w-full text-sm [color-scheme:dark]"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              min={startDate || undefined}
+              aria-label="Trip end date"
+            />
+          </div>
         </div>
       </div>
 
