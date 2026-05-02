@@ -1367,6 +1367,15 @@ export default function TransactionsPage() {
       if (statementIdFilter && t.statement_id !== statementIdFilter) return false
 
       return true
+    }).sort((a, b) => {
+      // In "All" tab only: push excluded transactions to the bottom so they don't
+      // clutter the view of active transactions. Within each group, preserve original order.
+      if (filter === 'all') {
+        const aExcluded = a.status === 'excluded' ? 1 : 0
+        const bExcluded = b.status === 'excluded' ? 1 : 0
+        return aExcluded - bExcluded
+      }
+      return 0
     })
   }, [transactions, filter, categoryFilter, searchQuery, dateFrom, dateTo, statementIdFilter])
 

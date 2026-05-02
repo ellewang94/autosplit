@@ -437,6 +437,14 @@ export default function UploadPage() {
   const successCount = queue.filter(item => item.status === 'done').length
   const errorCount = queue.filter(item => item.status === 'error').length
 
+  // When there are multiple members, the card holder field becomes meaningful —
+  // without it we can't attribute expenses to the right person's card.
+  // We warn (but don't hard-block) so the user knows what they're skipping.
+  const pendingWithoutHolder = members.length > 1
+    ? queue.filter(item => item.status === 'pending' && !item.cardHolderId)
+    : []
+  const cardHolderMissing = pendingWithoutHolder.length > 0
+
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <div className="max-w-2xl mx-auto">
@@ -453,114 +461,10 @@ export default function UploadPage() {
         Upload one or more bank statements — drop them all at once.
       </p>
 
-      {/* ── Already imported statements ──────────────────────────────────────── */}
-      {statements.filter(s => !s.is_manual).length > 0 && (
-        <div className="card mb-6">
-          <h2 className="font-display text-base font-semibold text-ink-200 mb-3 flex items-center gap-2">
-            <List size={14} className="text-ink-500" />
-            Already Imported
-          </h2>
-          <div className="space-y-2">
-            {statements.filter(s => !s.is_manual).map((s) => {
-              const holder = s.card_holder_member_id
-                ? members.find(m => m.id === s.card_holder_member_id)?.name
-                : null
-              const period = fmtPeriod(s)
-              const isConfirming = confirmDeleteId === s.id
-              return (
-                <div key={s.id} className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-ink-800/50 group">
-                  <CheckCircle size={13} className="text-lime-400 flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <span className="text-sm text-ink-200 font-medium">
-                      {/* Show "Alex's Chase" if we have both; gracefully fall back */}
-                      {holder
-                        ? `${holder}'s ${s.bank_name || 'Card'}`
-                        : s.bank_name || 'Statement'
-                      }
-                    </span>
-                    {period && <span className="text-xs text-ink-500 ml-2">{period}</span>}
-                  </div>
-                  <span className="text-xs font-mono text-ink-500 flex-shrink-0">{s.transaction_count} txns</span>
-                  {isConfirming ? (
-                    <div className="flex items-center gap-1 flex-shrink-0">
-                      <span className="text-[10px] text-red-400">Delete?</span>
-                      <button
-                        className="px-1.5 py-0.5 rounded text-[10px] bg-red-500 text-white hover:bg-red-400 transition-colors"
-                        onClick={() => deleteStatement(s.id)}
-                      >Yes</button>
-                      <button
-                        className="px-1.5 py-0.5 rounded text-[10px] bg-ink-700 text-ink-300 hover:bg-ink-600 transition-colors"
-                        onClick={() => setConfirmDeleteId(null)}
-                      >No</button>
-                    </div>
-                  ) : (
-                    <button
-                      className="p-1 rounded text-ink-600 hover:text-red-400 hover:bg-red-400/10 transition-all flex-shrink-0 sm:opacity-0 sm:group-hover:opacity-100"
-                      title="Delete this statement and all its transactions"
-                      onClick={() => setConfirmDeleteId(s.id)}
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* ── Bank download instructions ────────────────────────────────────────── */}
-      {/* Collapsed by default — users who know what they're doing skip right past */}
-      <div className="card mb-4">
-        <div className="space-y-2">
-          <BankInstructions banks={PDF_BANKS} title="How to download your statement PDF (Chase, Amex, BofA)" />
-          <BankInstructions banks={CSV_BANKS} title="How to export transaction CSV from your bank" />
-        </div>
-      </div>
-
-      {/* ── Currency (global for the batch) ──────────────────────────────────── */}
-      <div className="card mb-4">
-        <label className="label">What currency are these statements in?</label>
-        <p className="text-xs text-ink-500 mb-3">
-          This trip settles in <span className="text-ink-300 font-medium">{baseCurrency}</span>.
-          Applies to all files below — set once, upload many.
-        </p>
-        <select
-          className="select mb-3"
-          value={statementCurrency}
-          onChange={(e) => { setStatementCurrency(e.target.value); setExchangeRate('') }}
-          disabled={uploading}
-        >
-          {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
-        </select>
-
-        {rateNeeded && (
-          <div className="rounded-lg bg-ink-800/60 border border-ink-700 px-4 py-3 animate-slide-up">
-            <label className="block text-xs text-ink-400 mb-2">
-              Exchange rate <span className="text-ink-600">(required)</span>
-            </label>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-ink-400">1 {statementCurrency} =</span>
-              <input
-                type="number" min="0.000001" step="any" placeholder="e.g. 0.74"
-                className="input flex-1 text-sm"
-                value={exchangeRate}
-                onChange={(e) => setExchangeRate(e.target.value)}
-                disabled={uploading}
-              />
-              <span className="text-xs text-ink-400">{baseCurrency}</span>
-            </div>
-            <p className="text-xs text-ink-600 mt-2">
-              Google "{statementCurrency} to {baseCurrency}" for the current rate.
-            </p>
-          </div>
-        )}
-      </div>
-
-      {/* ── Drop zone + queue ─────────────────────────────────────────────────── */}
+      {/* ── Drop zone + queue — FIRST thing users see, primary action ─────────── */}
       <div className="card mb-4">
         <label className="label mb-3">
-          {queue.length === 0 ? 'Drop your statements here' : `${queue.length} file${queue.length !== 1 ? 's' : ''} queued`}
+          {queue.length === 0 ? 'Drop your bank statements here' : `${queue.length} file${queue.length !== 1 ? 's' : ''} queued`}
         </label>
 
         {/* Drop zone — accepts both PDF and CSV, type is auto-detected per file */}
@@ -618,13 +522,128 @@ export default function UploadPage() {
         )}
       </div>
 
-      {/* ── Upload button ─────────────────────────────────────────────────────── */}
-      {hasPending && !allFinished && (
-        <button
-          className="btn-primary w-full justify-center py-3"
-          onClick={uploadAll}
-          disabled={uploading || !rateValid}
+      {/* ── Currency (global for the batch) — secondary, below the drop zone ──── */}
+      <div className="card mb-4">
+        <label className="label">What currency are these statements in?</label>
+        <p className="text-xs text-ink-500 mb-3">
+          This trip settles in <span className="text-ink-300 font-medium">{baseCurrency}</span>.
+          Applies to all files — set once, upload many.
+        </p>
+        <select
+          className="select mb-3"
+          value={statementCurrency}
+          onChange={(e) => { setStatementCurrency(e.target.value); setExchangeRate('') }}
+          disabled={uploading}
         >
+          {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+
+        {rateNeeded && (
+          <div className="rounded-lg bg-ink-800/60 border border-ink-700 px-4 py-3 animate-slide-up">
+            <label className="block text-xs text-ink-400 mb-2">
+              Exchange rate <span className="text-ink-600">(required)</span>
+            </label>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-ink-400">1 {statementCurrency} =</span>
+              <input
+                type="number" min="0.000001" step="any" placeholder="e.g. 0.74"
+                className="input flex-1 text-sm"
+                value={exchangeRate}
+                onChange={(e) => setExchangeRate(e.target.value)}
+                disabled={uploading}
+              />
+              <span className="text-xs text-ink-400">{baseCurrency}</span>
+            </div>
+            <p className="text-xs text-ink-600 mt-2">
+              Google "{statementCurrency} to {baseCurrency}" for the current rate.
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* ── Bank download instructions — collapsed by default, secondary ─────── */}
+      <div className="card mb-4">
+        <div className="space-y-2">
+          <BankInstructions banks={PDF_BANKS} title="How to download your statement PDF (Chase, Amex, BofA)" />
+          <BankInstructions banks={CSV_BANKS} title="How to export transaction CSV from your bank" />
+        </div>
+      </div>
+
+      {/* ── Already imported statements ──────────────────────────────────────── */}
+      {statements.filter(s => !s.is_manual).length > 0 && (
+        <div className="card mb-6">
+          <h2 className="font-display text-base font-semibold text-ink-200 mb-3 flex items-center gap-2">
+            <List size={14} className="text-ink-500" />
+            Already Imported
+          </h2>
+          <div className="space-y-2">
+            {statements.filter(s => !s.is_manual).map((s) => {
+              const holder = s.card_holder_member_id
+                ? members.find(m => m.id === s.card_holder_member_id)?.name
+                : null
+              const period = fmtPeriod(s)
+              const isConfirming = confirmDeleteId === s.id
+              return (
+                <div key={s.id} className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-ink-800/50 group">
+                  <CheckCircle size={13} className="text-lime-400 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm text-ink-200 font-medium">
+                      {/* Show "Alex's Chase" if we have both; gracefully fall back */}
+                      {holder
+                        ? `${holder}'s ${s.bank_name || 'Card'}`
+                        : s.bank_name || 'Statement'
+                      }
+                    </span>
+                    {period && <span className="text-xs text-ink-500 ml-2">{period}</span>}
+                  </div>
+                  <span className="text-xs font-mono text-ink-500 flex-shrink-0">{s.transaction_count} txns</span>
+                  {isConfirming ? (
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      <span className="text-[10px] text-red-400">Delete?</span>
+                      <button
+                        className="px-1.5 py-0.5 rounded text-[10px] bg-red-500 text-white hover:bg-red-400 transition-colors"
+                        onClick={() => deleteStatement(s.id)}
+                      >Yes</button>
+                      <button
+                        className="px-1.5 py-0.5 rounded text-[10px] bg-ink-700 text-ink-300 hover:bg-ink-600 transition-colors"
+                        onClick={() => setConfirmDeleteId(null)}
+                      >No</button>
+                    </div>
+                  ) : (
+                    <button
+                      className="p-1 rounded text-ink-600 hover:text-red-400 hover:bg-red-400/10 transition-all flex-shrink-0 sm:opacity-0 sm:group-hover:opacity-100"
+                      title="Delete this statement and all its transactions"
+                      onClick={() => setConfirmDeleteId(s.id)}
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── Upload button + card holder warning ──────────────────────────────── */}
+      {hasPending && !allFinished && (
+        <>
+          {/* Warn when multiple members exist but card holder isn't set — */}
+          {/* this matters for settlement so we surface it before they upload */}
+          {cardHolderMissing && (
+            <div className="mb-3 flex items-start gap-2 px-4 py-3 rounded-xl bg-amber-400/10 border border-amber-400/25 text-xs text-amber-300">
+              <AlertTriangle size={13} className="flex-shrink-0 mt-0.5" />
+              <span>
+                <strong>Card holder not set</strong> on {pendingWithoutHolder.length > 1 ? `${pendingWithoutHolder.length} files` : '1 file'}.
+                Without this, we can't attribute expenses to the right person — set it above before uploading.
+              </span>
+            </div>
+          )}
+          <button
+            className="btn-primary w-full justify-center py-3"
+            onClick={uploadAll}
+            disabled={uploading || !rateValid}
+          >
           {uploading ? (
             <>
               <Loader size={15} className="animate-spin" />
@@ -640,6 +659,7 @@ export default function UploadPage() {
             </>
           )}
         </button>
+        </>
       )}
     </div>
   )

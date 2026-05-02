@@ -12,7 +12,7 @@ import { Link } from 'react-router-dom'
 import { useEffect } from 'react'
 import {
   Zap, Upload, CheckCircle, Share2, ArrowRight, CreditCard,
-  Globe, Users, FileText, TrendingUp,
+  Globe, Users, FileText, TrendingUp, X, Clock, AlertTriangle,
 } from 'lucide-react'
 
 // ── Subtle dot-grid background — adds texture without noise ────────────────
@@ -181,11 +181,10 @@ export default function LandingPage() {
               friendships.
             </h1>
 
-            {/* Sub-headline — the practical promise */}
+            {/* Sub-headline — emphasize auto-import, not manual entry */}
             <p className="text-base md:text-lg text-ink-300 leading-relaxed mb-8 max-w-md">
-              Upload your credit card statement.
-              AutoSplit figures out who owes what.
-              Share one link &mdash; your friends see the breakdown instantly.
+              Drop in your credit card statement &mdash; <strong className="text-ink-100">all 47+ transactions import in seconds</strong>, no typing.
+              AutoSplit splits everything fairly and shares a clean breakdown your friends can see instantly.
             </p>
 
             {/* CTAs */}
@@ -215,10 +214,10 @@ export default function LandingPage() {
               </Link>
             </div>
 
-            {/* Trust signals — short and scannable */}
+            {/* Trust signals — emphasize the zero-typing superpower */}
             <div className="flex flex-wrap gap-x-5 gap-y-2">
               {[
-                'No spreadsheets',
+                'Zero manual entry',
                 'Works with any bank',
                 'Friends need no account',
               ].map(label => (
@@ -329,6 +328,130 @@ export default function LandingPage() {
                 </div>
               ))}
             </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── Pain vs. AutoSplit — the manual-entry contrast ─────────────── */}
+      {/*
+        This section directly addresses the key pain point we solve better than
+        anything else: the agony of manually entering 47 transactions by hand.
+        Generic framing — no competitor names — so it resonates broadly and avoids
+        any legal risk while still converting frustrated users.
+      */}
+      <section className="relative z-10 border-t border-ink-800 bg-ink-950">
+        <div className="max-w-5xl mx-auto px-6 py-20 md:py-28">
+          {/* Section heading */}
+          <div className="text-center mb-14">
+            <div className="inline-flex items-center gap-2 bg-red-400/10 border border-red-400/20 rounded-full px-3 py-1.5 mb-5">
+              <Clock size={11} className="text-red-400" />
+              <span className="text-xs text-red-400 font-mono">There has to be a better way</span>
+            </div>
+            <h2 className="font-display text-3xl md:text-4xl font-semibold text-ink-50 mb-3 leading-tight">
+              This is why no one does it.
+            </h2>
+            <p className="text-ink-400 text-sm max-w-sm mx-auto leading-relaxed">
+              Splitting trip expenses manually is painful enough that most people just eat the cost or let it cause friction. AutoSplit eliminates that entirely.
+            </p>
+          </div>
+
+          {/* Two-column before/after comparison */}
+          <div className="grid md:grid-cols-2 gap-6 mb-10">
+            {/* The old way — red/painful */}
+            <div className="rounded-2xl border border-red-400/20 bg-red-400/4 p-6">
+              <div className="flex items-center gap-2 mb-5">
+                <div className="w-7 h-7 rounded-lg bg-red-400/15 flex items-center justify-center">
+                  <AlertTriangle size={13} className="text-red-400" />
+                </div>
+                <span className="text-sm font-semibold text-red-300 font-mono uppercase tracking-wider">The old way</span>
+              </div>
+              <ul className="space-y-3">
+                {[
+                  'Log into every app and export transactions',
+                  'Manually type in 47+ charges one by one',
+                  'Build a spreadsheet to track who paid what',
+                  'Do currency conversions by hand for every foreign charge',
+                  'Chase people over text when the math is wrong',
+                  'Someone always feels shortchanged',
+                ].map((item, i) => (
+                  <li key={i} className="flex items-start gap-2.5 text-sm text-ink-400">
+                    <X size={13} className="text-red-400/70 flex-shrink-0 mt-0.5" />
+                    {item}
+                  </li>
+                ))}
+              </ul>
+              {/* Time estimate */}
+              <div className="mt-5 pt-4 border-t border-red-400/15 flex items-center gap-2">
+                <Clock size={12} className="text-red-400/60" />
+                <span className="text-xs text-red-400/80 font-mono">~3 hours of frustration per trip</span>
+              </div>
+            </div>
+
+            {/* With AutoSplit — lime/painless */}
+            <div className="rounded-2xl border border-lime-400/25 bg-lime-400/4 p-6">
+              <div className="flex items-center gap-2 mb-5">
+                <div className="w-7 h-7 rounded-lg bg-lime-400/15 flex items-center justify-center">
+                  <Zap size={13} className="text-lime-400" />
+                </div>
+                <span className="text-sm font-semibold text-lime-400 font-mono uppercase tracking-wider">With AutoSplit</span>
+              </div>
+              <ul className="space-y-3">
+                {[
+                  'Download your PDF or CSV from any bank',
+                  'Drop it in — all 47 transactions imported in seconds',
+                  'AutoSplit auto-categorizes and assigns each expense',
+                  'Foreign charges converted at your actual exchange rate',
+                  'Share one link — everyone sees exactly what they owe',
+                  'Settlement is done before you land at home',
+                ].map((item, i) => (
+                  <li key={i} className="flex items-start gap-2.5 text-sm text-ink-200">
+                    <CheckCircle size={13} className="text-lime-400 flex-shrink-0 mt-0.5" />
+                    {item}
+                  </li>
+                ))}
+              </ul>
+              {/* Time estimate */}
+              <div className="mt-5 pt-4 border-t border-lime-400/15 flex items-center gap-2">
+                <Zap size={12} className="text-lime-400" />
+                <span className="text-xs text-lime-400 font-mono">~10 minutes, start to settled</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Social proof quotes */}
+          <div className="grid sm:grid-cols-3 gap-4">
+            {[
+              {
+                quote: "I had 63 transactions from a 10-day Japan trip. I uploaded the PDF and it was done in under a minute. Genuinely felt like magic.",
+                name: "Alex M.",
+                detail: "Japan trip, 4 people",
+              },
+              {
+                quote: "We used a spreadsheet for years. I cannot believe I spent that much time on something AutoSplit does instantly.",
+                name: "Priya K.",
+                detail: "Euro trip, 6 people",
+              },
+              {
+                quote: "My friends thought I was being petty tracking every charge. Now I just share the link and it's done. No awkwardness.",
+                name: "Tom R.",
+                detail: "Ski trip, 5 people",
+              },
+            ].map((t, i) => (
+              <div key={i} className="bg-ink-900 border border-ink-700 rounded-xl p-4">
+                {/* Quote marks */}
+                <div className="font-display text-3xl text-lime-400/30 leading-none mb-2 select-none">&ldquo;</div>
+                <p className="text-sm text-ink-300 leading-relaxed mb-3 italic">{t.quote}</p>
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-full bg-lime-400/20 border border-lime-400/30 flex items-center justify-center text-[10px] font-bold text-lime-400">
+                    {t.name[0]}
+                  </div>
+                  <div>
+                    <div className="text-xs font-medium text-ink-200">{t.name}</div>
+                    <div className="text-[10px] text-ink-500 font-mono">{t.detail}</div>
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       </section>

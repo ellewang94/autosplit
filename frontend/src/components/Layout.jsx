@@ -218,7 +218,6 @@ function SidebarContent({ groupId, onNavigate, onFeedback }) {
           </div>
           <div>
             <div className="font-display text-lg font-semibold text-ink-50 leading-none">AutoSplit</div>
-            <div className="text-[10px] text-ink-500 font-mono tracking-wider mt-0.5">v1.0 MVP</div>
           </div>
         </div>
       </div>

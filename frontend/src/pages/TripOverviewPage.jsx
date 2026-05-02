@@ -5,7 +5,7 @@ import { api } from '../api/client'
 import {
   Upload, List, TrendingUp, CheckCircle, AlertTriangle,
   Calendar, Users, ArrowRight, FileText, ChevronRight, Trash2,
-  Link2, Loader, Plus, Pencil, X,
+  Link2, Loader, Plus, Pencil, X, Copy, MessageCircle, UserCheck,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useAuth } from '../contexts/AuthContext'
@@ -143,6 +143,10 @@ export default function TripOverviewPage() {
   const { user } = useAuth()
   const [inviteCopied, setInviteCopied] = useState(false)
   const [inviteLoading, setInviteLoading] = useState(false)
+  // Holds the fetched invite URL so we can display it in the card and offer share options
+  const [inviteUrl, setInviteUrl] = useState(null)
+  // Whether the prominent invite card is expanded (owner clicks it to reveal share options)
+  const [inviteOpen, setInviteOpen] = useState(false)
 
   // ── Inline date editor ────────────────────────────────────────────────────
   const [editingDates, setEditingDates] = useState(false)
@@ -172,19 +176,50 @@ export default function TripOverviewPage() {
   // True if the current user is the trip owner OR if it's a legacy group (no owner)
   const isOwner = !group?.owner_id || group.owner_id === user?.id
 
+  // Fetch or re-use the invite link, then copy to clipboard
   async function handleInvite() {
     setInviteLoading(true)
     try {
       const data = await api.getInviteLink(groupId)
+      setInviteUrl(data.invite_url)
       await navigator.clipboard.writeText(data.invite_url)
       setInviteCopied(true)
       setTimeout(() => setInviteCopied(false), 3000)
     } catch (e) {
-      // Fallback: copy to clipboard failed — show the URL in an alert
       console.error('Copy failed:', e)
     } finally {
       setInviteLoading(false)
     }
+  }
+
+  // Open the invite card — fetches the link in the background so it's ready to copy/share
+  async function openInviteCard() {
+    setInviteOpen(true)
+    if (!inviteUrl) {
+      setInviteLoading(true)
+      try {
+        const data = await api.getInviteLink(groupId)
+        setInviteUrl(data.invite_url)
+      } catch (e) {
+        console.error('Failed to get invite link:', e)
+      } finally {
+        setInviteLoading(false)
+      }
+    }
+  }
+
+  // Share via WhatsApp deep link (works on mobile and desktop)
+  function shareWhatsApp() {
+    if (!inviteUrl) return
+    const text = encodeURIComponent(`Join our trip "${group?.name}" on AutoSplit — add your card statement so we can split expenses fairly: ${inviteUrl}`)
+    window.open(`https://wa.me/?text=${text}`, '_blank')
+  }
+
+  // Share via iMessage (tel: links open Messages on Mac/iPhone)
+  function shareMessages() {
+    if (!inviteUrl) return
+    const text = encodeURIComponent(`Join our trip "${group?.name}" on AutoSplit: ${inviteUrl}`)
+    window.open(`sms:?&body=${text}`, '_blank')
   }
 
   // ── Compute stats from transactions ───────────────────────────────────────
@@ -229,34 +264,40 @@ export default function TripOverviewPage() {
         <div className="flex items-center gap-4 mt-2 flex-wrap">
           {/* Date range — click pencil to edit inline */}
           {editingDates ? (
-            <div className="flex items-center gap-2 flex-wrap">
-              <Calendar size={13} className="text-ink-500 flex-shrink-0" />
-              <input
-                type="date"
-                className="input text-sm py-1 px-2 w-36"
-                value={editStart}
-                onChange={e => setEditStart(e.target.value)}
-              />
-              <span className="text-ink-500 text-xs">–</span>
-              <input
-                type="date"
-                className="input text-sm py-1 px-2 w-36"
-                value={editEnd}
-                onChange={e => setEditEnd(e.target.value)}
-              />
-              <button
-                className="btn-primary text-xs py-1 px-3"
-                onClick={() => updateDates.mutate()}
-                disabled={updateDates.isPending}
-              >
-                {updateDates.isPending ? <Loader size={11} className="animate-spin" /> : 'Save'}
-              </button>
-              <button
-                className="text-ink-500 hover:text-ink-300 transition-colors"
-                onClick={() => setEditingDates(false)}
-              >
-                <X size={13} />
-              </button>
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Calendar size={13} className="text-ink-500 flex-shrink-0" />
+                <input
+                  type="date"
+                  className="input text-sm py-1 px-2 w-36"
+                  value={editStart}
+                  onChange={e => setEditStart(e.target.value)}
+                />
+                <span className="text-ink-500 text-xs">–</span>
+                <input
+                  type="date"
+                  className="input text-sm py-1 px-2 w-36"
+                  value={editEnd}
+                  onChange={e => setEditEnd(e.target.value)}
+                />
+                <button
+                  className="btn-primary text-xs py-1 px-3"
+                  onClick={() => updateDates.mutate()}
+                  disabled={updateDates.isPending}
+                >
+                  {updateDates.isPending ? <Loader size={11} className="animate-spin" /> : 'Save'}
+                </button>
+                <button
+                  className="text-ink-500 hover:text-ink-300 transition-colors"
+                  onClick={() => setEditingDates(false)}
+                >
+                  <X size={13} />
+                </button>
+              </div>
+              {/* Explain what trip dates actually do — surfaced here where users edit them */}
+              <p className="text-xs text-amber-400/80 pl-5">
+                Transactions outside these dates will be auto-excluded from settlement — so you don't accidentally split your regular grocery runs.
+              </p>
             </div>
           ) : (
             <div className="flex items-center gap-1.5 text-sm text-ink-400 group/dates">
@@ -301,21 +342,98 @@ export default function TripOverviewPage() {
             </span>
           </div>
 
-          {/* Invite button — only for trip owner */}
-          {isOwner && (
-            <button
-              onClick={handleInvite}
-              disabled={inviteLoading}
-              className="flex items-center gap-1.5 text-xs text-ink-400 hover:text-lime-400 transition-colors mt-3"
-            >
-              {inviteCopied ? (
-                <><CheckCircle size={13} className="text-lime-400" /> Invite link copied!</>
-              ) : inviteLoading ? (
-                <><Loader size={13} className="animate-spin" /> Getting link…</>
+          {/* Invite card — only for trip owner. Prominent and actionable, not a tiny text link. */}
+          {isOwner && members.length > 0 && (
+            <div className="mt-4 w-full">
+              {!inviteOpen ? (
+                /* Collapsed state — shows as a clear call-to-action button */
+                <button
+                  onClick={openInviteCard}
+                  className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-lime-400/8 border border-lime-400/25 hover:bg-lime-400/12 hover:border-lime-400/40 transition-all text-left group"
+                >
+                  <div className="w-8 h-8 rounded-lg bg-lime-400/15 flex items-center justify-center flex-shrink-0 group-hover:bg-lime-400/25 transition-colors">
+                    <UserCheck size={15} className="text-lime-400" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-sm font-medium text-ink-100">Invite your travel companions</div>
+                    <div className="text-xs text-ink-500 mt-0.5">
+                      Share a link so {members.length > 1 ? `all ${members.length} members` : 'your friend'} can upload their card statements
+                    </div>
+                  </div>
+                  <ChevronRight size={14} className="text-ink-500 flex-shrink-0 group-hover:text-lime-400 transition-colors" />
+                </button>
               ) : (
-                <><Link2 size={13} /> Invite friends to this trip</>
+                /* Expanded state — full invite panel with copy + share options */
+                <div className="rounded-xl border border-lime-400/25 bg-ink-900 overflow-hidden animate-slide-up">
+                  {/* Header */}
+                  <div className="flex items-center justify-between px-4 py-3 border-b border-ink-800">
+                    <div className="flex items-center gap-2">
+                      <UserCheck size={14} className="text-lime-400" />
+                      <span className="text-sm font-medium text-ink-100">Invite your travel companions</span>
+                    </div>
+                    <button
+                      onClick={() => setInviteOpen(false)}
+                      className="text-ink-600 hover:text-ink-400 transition-colors"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+
+                  <div className="p-4 space-y-3">
+                    <p className="text-xs text-ink-400 leading-relaxed">
+                      Anyone with this link can join the trip and upload their own card statement.
+                      They don't need an account — it takes 30 seconds.
+                    </p>
+
+                    {/* Link display + copy button */}
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg bg-ink-800 border border-ink-700 min-w-0">
+                        <Link2 size={12} className="text-ink-500 flex-shrink-0" />
+                        {inviteLoading ? (
+                          <span className="text-xs text-ink-500 font-mono truncate">Getting link…</span>
+                        ) : inviteUrl ? (
+                          <span className="text-xs text-ink-300 font-mono truncate">{inviteUrl}</span>
+                        ) : (
+                          <span className="text-xs text-ink-600 italic">Failed to load link</span>
+                        )}
+                      </div>
+                      <button
+                        onClick={handleInvite}
+                        disabled={inviteLoading || !inviteUrl}
+                        className="flex-shrink-0 btn-primary text-xs py-2 px-3"
+                      >
+                        {inviteCopied ? (
+                          <><CheckCircle size={13} /> Copied!</>
+                        ) : (
+                          <><Copy size={13} /> Copy</>
+                        )}
+                      </button>
+                    </div>
+
+                    {/* Quick share row */}
+                    <div className="flex items-center gap-2 pt-1">
+                      <span className="text-xs text-ink-600">Share via</span>
+                      <button
+                        onClick={shareWhatsApp}
+                        disabled={!inviteUrl}
+                        className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg bg-green-500/10 border border-green-500/20 text-green-400 hover:bg-green-500/20 transition-colors disabled:opacity-40"
+                      >
+                        <MessageCircle size={12} />
+                        WhatsApp
+                      </button>
+                      <button
+                        onClick={shareMessages}
+                        disabled={!inviteUrl}
+                        className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400 hover:bg-blue-500/20 transition-colors disabled:opacity-40"
+                      >
+                        <MessageCircle size={12} />
+                        iMessage
+                      </button>
+                    </div>
+                  </div>
+                </div>
               )}
-            </button>
+            </div>
           )}
         </div>
       </div>

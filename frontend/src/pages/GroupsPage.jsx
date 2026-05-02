@@ -88,6 +88,7 @@ function GroupCard({ group }) {
   const qc = useQueryClient()
   const [addingMember, setAddingMember] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [expanded, setExpanded] = useState(false)
 
   const deleteMember = useMutation({
     mutationFn: (id) => api.deleteMember(id),
@@ -100,90 +101,135 @@ function GroupCard({ group }) {
   })
 
   return (
-    <div className="card animate-slide-up">
-      {/* Header */}
-      <div className="flex items-start justify-between mb-4">
-        <div>
-          <h3
-            className="font-display text-xl font-semibold text-ink-50 hover:text-lime-400 transition-colors cursor-pointer"
-            onClick={() => navigate(`/groups/${group.id}`)}
-          >{group.name}</h3>
-          <p className="text-xs text-ink-500 font-mono mt-0.5">
-            {group.members.length} member{group.members.length !== 1 ? 's' : ''}
-          </p>
-          {/* Show trip date range if set */}
-          {group.start_date && group.end_date && (
-            <p className="text-xs text-lime-400/80 font-mono mt-1 flex items-center gap-1">
-              <Calendar size={10} />
-              {formatDateRange(group.start_date, group.end_date)}
-            </p>
-          )}
-        </div>
-        <div className="flex items-center gap-1">
-          {!confirmDelete ? (
-            <button
-              className="btn-ghost p-2 text-ink-500 hover:text-red-400"
-              onClick={() => setConfirmDelete(true)}
-            >
-              <Trash2 size={14} />
-            </button>
-          ) : (
-            <div className="flex items-center gap-1">
-              <span className="text-xs text-ink-400">Delete?</span>
-              <button className="btn-danger py-1 px-2 text-xs" onClick={() => deleteGroup.mutate()}>Yes</button>
-              <button className="btn-ghost py-1 px-2 text-xs" onClick={() => setConfirmDelete(false)}>No</button>
-            </div>
-          )}
-        </div>
-      </div>
+    <div className="bg-ink-900 border border-ink-700 rounded-2xl overflow-hidden animate-slide-up hover:border-ink-600 transition-all duration-200">
 
-      {/* Members list */}
-      <div className="space-y-2 mb-4">
-        {group.members.length === 0 && (
-          <p className="text-sm text-ink-500 italic">No members yet — add some below</p>
-        )}
-        {group.members.map((m, i) => (
-          <div key={m.id} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-ink-800/50 group">
-            <MemberAvatar name={m.name} index={i} />
-            <span className="flex-1 text-sm text-ink-200 font-medium">{m.name}</span>
-            <button
-              className="text-ink-500 hover:text-red-400 transition-all sm:opacity-0 sm:group-hover:opacity-100"
-              onClick={() => deleteMember.mutate(m.id)}
-            >
-              <X size={13} />
-            </button>
+      {/* Clickable header — takes you straight into the trip */}
+      <div
+        className="px-5 pt-5 pb-4 cursor-pointer group"
+        onClick={() => navigate(`/groups/${group.id}`)}
+      >
+        {/* Top row: name + delete */}
+        <div className="flex items-start justify-between gap-2 mb-3">
+          <div className="min-w-0">
+            <h3 className="font-display text-xl font-semibold text-ink-50 group-hover:text-lime-400 transition-colors truncate">
+              {group.name}
+            </h3>
+            {/* Date range badge — only shown if dates are set */}
+            {group.start_date && group.end_date ? (
+              <p className="text-xs text-lime-400/70 font-mono mt-1 flex items-center gap-1.5">
+                <Calendar size={10} />
+                {formatDateRange(group.start_date, group.end_date)}
+              </p>
+            ) : (
+              <p className="text-xs text-ink-600 font-mono mt-1">No dates set</p>
+            )}
           </div>
-        ))}
+
+          {/* Delete control — stops propagation so clicking it doesn't open the trip */}
+          <div
+            className="flex items-center gap-1 flex-shrink-0"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {!confirmDelete ? (
+              <button
+                className="btn-ghost p-1.5 text-ink-600 hover:text-red-400"
+                onClick={() => setConfirmDelete(true)}
+              >
+                <Trash2 size={13} />
+              </button>
+            ) : (
+              <div className="flex items-center gap-1">
+                <span className="text-xs text-ink-400">Delete?</span>
+                <button className="btn-danger py-0.5 px-2 text-xs" onClick={() => deleteGroup.mutate()}>Yes</button>
+                <button className="btn-ghost py-0.5 px-2 text-xs" onClick={() => setConfirmDelete(false)}>No</button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Member avatar cluster */}
+        <div className="flex items-center gap-2">
+          {group.members.length === 0 ? (
+            <span className="text-xs text-ink-500 italic">No members yet</span>
+          ) : (
+            <>
+              {/* Stack up to 4 avatars with a slight overlap */}
+              <div className="flex -space-x-2">
+                {group.members.slice(0, 4).map((m, i) => (
+                  <div
+                    key={m.id}
+                    className={`w-7 h-7 rounded-full border-2 border-ink-900 flex items-center justify-center text-[10px] font-bold ${MEMBER_COLORS[i % MEMBER_COLORS.length]}`}
+                    title={m.name}
+                  >
+                    {m.name[0].toUpperCase()}
+                  </div>
+                ))}
+                {group.members.length > 4 && (
+                  <div className="w-7 h-7 rounded-full border-2 border-ink-900 bg-ink-700 flex items-center justify-center text-[9px] font-bold text-ink-300">
+                    +{group.members.length - 4}
+                  </div>
+                )}
+              </div>
+              <span className="text-xs text-ink-500">
+                {group.members.map(m => m.name).join(', ')}
+              </span>
+            </>
+          )}
+        </div>
       </div>
 
-      {/* Add member */}
-      {addingMember ? (
-        <AddMemberInline
-          groupId={group.id}
-          onDone={() => setAddingMember(false)}
-          // When no members yet, suggest the user's own name (from onboarding capture)
-          prefill={group.members.length === 0 ? (localStorage.getItem('autosplit_display_name') || '') : ''}
-        />
-      ) : (
+      {/* Bottom action bar */}
+      <div className="px-5 pb-4 flex items-center gap-2">
+        {/* Open trip — primary action */}
         <button
-          className="btn-ghost w-full justify-center py-2 border border-dashed border-ink-700"
-          onClick={() => setAddingMember(true)}
+          className="btn-primary flex-1 justify-center text-sm py-2"
+          onClick={() => navigate(`/groups/${group.id}`)}
         >
-          <UserPlus size={14} />
-          Add member
+          Open Trip
+          <ChevronRight size={14} />
         </button>
-      )}
 
-      {/* Action button — always goes to the trip overview */}
-      {group.members.length > 0 && (
-        <div className="mt-4 pt-4 border-t border-ink-800">
-          <button
-            className="btn-primary w-full justify-center text-sm"
-            onClick={() => navigate(`/groups/${group.id}`)}
-          >
-            Open Trip
-            <ChevronRight size={14} />
-          </button>
+        {/* Expand/collapse members panel */}
+        <button
+          className="btn-secondary py-2 px-3 text-xs"
+          onClick={() => setExpanded(!expanded)}
+          title="Manage members"
+        >
+          <Users size={13} />
+        </button>
+      </div>
+
+      {/* Collapsible members management panel */}
+      {expanded && (
+        <div className="px-5 pb-4 border-t border-ink-800 pt-4 space-y-2">
+          {group.members.map((m, i) => (
+            <div key={m.id} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-ink-800/50 group">
+              <MemberAvatar name={m.name} index={i} />
+              <span className="flex-1 text-sm text-ink-200 font-medium">{m.name}</span>
+              <button
+                className="text-ink-600 hover:text-red-400 transition-all"
+                onClick={() => deleteMember.mutate(m.id)}
+              >
+                <X size={13} />
+              </button>
+            </div>
+          ))}
+
+          {addingMember ? (
+            <AddMemberInline
+              groupId={group.id}
+              onDone={() => setAddingMember(false)}
+              prefill={group.members.length === 0 ? (localStorage.getItem('autosplit_display_name') || '') : ''}
+            />
+          ) : (
+            <button
+              className="btn-ghost w-full justify-center py-2 border border-dashed border-ink-700 text-xs"
+              onClick={() => setAddingMember(true)}
+            >
+              <UserPlus size={13} />
+              Add member
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -203,6 +249,7 @@ const CURRENCIES = [
   { code: 'SGD', label: 'SGD — Singapore Dollar' },
   { code: 'HKD', label: 'HKD — Hong Kong Dollar' },
   { code: 'THB', label: 'THB — Thai Baht' },
+  { code: 'MXN', label: 'MXN — Mexican Peso' },
 ]
 
 function CreateGroupForm({ onDone }) {
@@ -272,8 +319,8 @@ function CreateGroupForm({ onDone }) {
           <Calendar size={11} />
           Trip dates <span className="text-ink-600">(optional)</span>
         </label>
-        <p className="text-xs text-ink-600 mb-2">
-          Transactions outside this range will be auto-excluded on import
+        <p className="text-xs text-ink-500 mb-2">
+          Transactions outside these dates will be <strong className="text-amber-400/90">auto-excluded</strong> from settlement — useful for filtering out everyday spending that snuck onto your trip card.
         </p>
         <div className="flex gap-2">
           <input
@@ -340,7 +387,7 @@ export default function GroupsPage() {
         <div>
           <h1 className="font-display text-2xl md:text-3xl font-semibold text-ink-50 tracking-tight">Trips</h1>
           <p className="text-ink-400 text-sm mt-1">
-            Manage your expense-sharing trips and households
+            All your trips in one place
           </p>
         </div>
         <button className="btn-primary" onClick={() => setCreating(!creating)}>

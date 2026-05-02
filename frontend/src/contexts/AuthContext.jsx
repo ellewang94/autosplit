@@ -32,9 +32,26 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    // 1. On mount, check if there's already a session in localStorage
+    // 1. On mount, check if there's already a session in localStorage.
+    //
+    // IMPORTANT: We add a 6-second timeout as a safety net. If Supabase is
+    // unreachable (e.g. project paused/deleted, no internet), the getSession()
+    // call may hang indefinitely — which leaves the whole app stuck on a loading
+    // spinner. The timeout ensures we always unblock the UI within 6 seconds,
+    // treating a network failure the same as "not logged in".
+    const timeoutId = setTimeout(() => {
+      setUser(null)
+      setLoading(false)
+    }, 6000)
+
     supabase.auth.getSession().then(({ data: { session } }) => {
+      clearTimeout(timeoutId)
       setUser(session?.user ?? null)
+      setLoading(false)
+    }).catch(() => {
+      // Network error (Supabase unreachable) — treat as logged out
+      clearTimeout(timeoutId)
+      setUser(null)
       setLoading(false)
     })
 
