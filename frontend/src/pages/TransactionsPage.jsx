@@ -681,7 +681,7 @@ function EditTransactionModal({ transaction, members, baseCurrency, onClose }) {
   )
 }
 
-function AddExpenseModal({ groupId, members, group, onClose, onSaved }) {
+function AddExpenseModal({ groupId, members, group, onClose, onSaved, autoSnap = false }) {
   const qc = useQueryClient()
 
   // The group's settlement currency — all foreign amounts convert to this
@@ -710,6 +710,16 @@ function AddExpenseModal({ groupId, members, group, onClose, onSaved }) {
   const [ocrLoading, setOcrLoading] = useState(false)
   const [ocrResult, setOcrResult] = useState(null) // { confidence, notes } from last successful parse
   const [ocrError, setOcrError] = useState('')
+
+  // If the modal was opened via the "Snap a receipt" path on the Add Expenses
+  // picker, fire the camera input on mount so the user lands directly on the
+  // photo picker. We wait one tick (timeout 0) so React finishes wiring the
+  // ref before we click — otherwise the ref is still null on first render.
+  useEffect(() => {
+    if (!autoSnap) return
+    const t = setTimeout(() => fileInputRef.current?.click(), 0)
+    return () => clearTimeout(t)
+  }, [autoSnap])
 
   async function handleReceiptUpload(file) {
     if (!file) return
@@ -1362,11 +1372,16 @@ export default function TransactionsPage() {
     setShowBulkTip(false)
   }
 
-  // If we arrived here via the "Add expense manually" shortcut from TripOverview,
-  // auto-open the modal so the user doesn't have to hunt for it.
+  // Cross-page state: { openAddExpense: bool, autoSnap: bool }
+  // - openAddExpense: opens the modal (from "Type manually" path or Add expense links)
+  // - autoSnap: also fires the camera input automatically (from "Snap a receipt" path
+  //   on the Add Expenses picker). We pass this down to the modal via a prop so it
+  //   can trigger the file input on mount.
+  const [autoSnapOnOpen, setAutoSnapOnOpen] = useState(false)
   useEffect(() => {
     if (location.state?.openAddExpense) {
       setShowAddExpense(true)
+      setAutoSnapOnOpen(!!location.state?.autoSnap)
       // Clear the navigation state so a page refresh doesn't re-open the modal
       window.history.replaceState({}, '', window.location.pathname)
     }
@@ -2248,13 +2263,16 @@ export default function TransactionsPage() {
         )
       })()}
 
-      {/* Add Expense modal — rendered as a portal-style overlay on top of everything */}
+      {/* Add Expense modal — rendered as a portal-style overlay on top of everything.
+          autoSnap=true tells it to auto-fire the camera input on mount, used by
+          the "Snap a receipt" path on the Add Expenses picker. */}
       {showAddExpense && members.length > 0 && (
         <AddExpenseModal
           groupId={groupId}
           members={members}
           group={group}   // needed so the modal knows the group's base currency
-          onClose={() => setShowAddExpense(false)}
+          onClose={() => { setShowAddExpense(false); setAutoSnapOnOpen(false) }}
+          autoSnap={autoSnapOnOpen}
         />
       )}
 

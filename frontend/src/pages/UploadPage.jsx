@@ -7,7 +7,7 @@ import {
   Upload, FileText, CheckCircle, AlertTriangle,
   ArrowRight, ChevronLeft, Info, List, Loader,
   FileSpreadsheet, ChevronDown, ChevronUp, Trash2,
-  ThumbsUp, ThumbsDown, Send, X, Plus,
+  ThumbsUp, ThumbsDown, Send, X, Plus, Camera, Edit3,
 } from 'lucide-react'
 import clsx from 'clsx'
 
@@ -458,45 +458,60 @@ export default function UploadPage() {
         Add Expenses
       </h1>
       <p className="text-ink-400 text-sm mb-6">
-        Upload a bank statement, or type in expenses one by one.
+        Pick whichever way matches what you've got — they all add up the same way.
       </p>
 
-      {/* ── Two paths: upload vs manual ──────────────────────────────────────────
-          Shown before the drop zone so new users immediately understand their options.
-          Manual entry is especially useful for invited friends with just a few expenses. */}
-      <div className="grid grid-cols-2 gap-3 mb-6">
-        {/* Upload path — highlighted as primary (most transactions) */}
-        <div className="card-sm border-lime-400/20 bg-lime-400/5">
-          <div className="flex items-start gap-2 mb-2">
-            <div className="w-7 h-7 rounded-lg bg-lime-400/15 flex items-center justify-center flex-shrink-0">
-              <FileText size={13} className="text-lime-400" />
-            </div>
-            <div>
-              <div className="text-sm font-semibold text-ink-100">Upload statement</div>
-              <div className="text-xs text-ink-500 mt-0.5 leading-relaxed">Best for many transactions — just drop a PDF or CSV from your bank</div>
-            </div>
-          </div>
-        </div>
+      {/* ── Three equal paths: Upload statement / Snap receipt / Type ─────────
+          The "Upload" card is just visual — the drop zone below is the actual
+          action surface for it (clicking the card scrolls there). The other
+          two are real buttons that open the Add Expense modal with the right
+          tool primed. All three are equal weight visually because the dummy
+          user can't predict which is "the right way" — most trips mix
+          statements, cash receipts, and one-off manual entries. */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-6">
 
-        {/* Manual path — secondary, but equal in importance for invited members */}
-        <button
-          className="card-sm text-left hover:border-ink-500 hover:bg-ink-800/60 transition-all group"
-          onClick={() => navigate(`/groups/${groupId}/transactions`, { state: { openAddExpense: true } })}
+        {/* Path 1 — Upload a statement (PDF/CSV) */}
+        <a
+          href="#dropzone"
+          onClick={(e) => { e.preventDefault(); document.getElementById('dropzone')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}
+          className="card-sm border-lime-400/25 bg-lime-400/5 hover:bg-lime-400/10 hover:border-lime-400/40 transition-all text-left block group"
         >
-          <div className="flex items-start gap-2 mb-2">
-            <div className="w-7 h-7 rounded-lg bg-ink-800 flex items-center justify-center flex-shrink-0 group-hover:bg-ink-700 transition-colors">
-              <Plus size={13} className="text-ink-400 group-hover:text-ink-200 transition-colors" />
-            </div>
-            <div>
-              <div className="text-sm font-semibold text-ink-100">Add manually</div>
-              <div className="text-xs text-ink-500 mt-0.5 leading-relaxed">Type in a few expenses — no file needed, takes 30 seconds</div>
-            </div>
+          <div className="w-9 h-9 rounded-lg bg-lime-400/15 flex items-center justify-center mb-2 group-hover:bg-lime-400/25 transition-colors">
+            <FileText size={15} className="text-lime-400" />
           </div>
+          <div className="text-sm font-semibold text-ink-100 mb-0.5">Upload statement</div>
+          <div className="text-xs text-ink-500 leading-relaxed">PDF or CSV from your bank. Best for many transactions at once.</div>
+        </a>
+
+        {/* Path 2 — Snap a receipt (Claude vision OCR fills the form) */}
+        <button
+          type="button"
+          onClick={() => navigate(`/groups/${groupId}/transactions`, { state: { openAddExpense: true, autoSnap: true } })}
+          className="card-sm text-left hover:border-ink-500 hover:bg-ink-800/60 transition-all group"
+        >
+          <div className="w-9 h-9 rounded-lg bg-amber-400/15 flex items-center justify-center mb-2 group-hover:bg-amber-400/25 transition-colors">
+            <Camera size={15} className="text-amber-400" />
+          </div>
+          <div className="text-sm font-semibold text-ink-100 mb-0.5">Snap a receipt</div>
+          <div className="text-xs text-ink-500 leading-relaxed">Photograph the paper receipt. AI fills in amount, merchant, date.</div>
+        </button>
+
+        {/* Path 3 — Type one expense manually */}
+        <button
+          type="button"
+          onClick={() => navigate(`/groups/${groupId}/transactions`, { state: { openAddExpense: true } })}
+          className="card-sm text-left hover:border-ink-500 hover:bg-ink-800/60 transition-all group"
+        >
+          <div className="w-9 h-9 rounded-lg bg-blue-400/15 flex items-center justify-center mb-2 group-hover:bg-blue-400/25 transition-colors">
+            <Edit3 size={15} className="text-blue-400" />
+          </div>
+          <div className="text-sm font-semibold text-ink-100 mb-0.5">Type manually</div>
+          <div className="text-xs text-ink-500 leading-relaxed">Cash dinner or one-off split. Open a blank expense form.</div>
         </button>
       </div>
 
-      {/* ── Drop zone + queue — FIRST thing users see, primary action ─────────── */}
-      <div className="card mb-4">
+      {/* ── Drop zone + queue — destination of the "Upload statement" card ───── */}
+      <div id="dropzone" className="card mb-4 scroll-mt-4">
         <label className="label mb-3">
           {queue.length === 0 ? 'Drop your bank statements here' : `${queue.length} file${queue.length !== 1 ? 's' : ''} queued`}
         </label>
