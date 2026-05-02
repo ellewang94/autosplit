@@ -22,7 +22,8 @@ from database import get_db
 from models.models import Group, Member, Statement, Transaction, MerchantRule, Feedback, TripShare
 from schemas.schemas import (
     GroupCreate, GroupResponse,
-    MemberCreate, MemberResponse, PaymentHandles,
+    MemberCreate, MemberCreateAdvanced, MemberResponse, PaymentHandles,
+    InviteSlotsRequest, InviteSlotsResponse, RecentCollaborator,
     StatementResponse, TransactionResponse, TransactionUpdate, BulkTransactionUpdate,
     MerchantRuleCreate, MerchantRuleResponse,
     SettlementRequest, SettlementResponse, UploadResponse,
@@ -185,13 +186,51 @@ def delete_group(
 
 @router.post("/groups/{group_id}/members", response_model=MemberResponse)
 def add_member(
-    group_id: int, body: MemberCreate,
+    group_id: int,
+    body: MemberCreateAdvanced,
     user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    """Add a member to the user's group."""
+    """
+    Add a member to the user's group.
+
+    Backwards-compatible with the simple `{name}` body, but also accepts:
+    - user_id: pre-link a known person (e.g. someone you collaborated with on
+      a past trip — saves them re-joining via invite link).
+    - payment_handles: carry over their saved Venmo/Cash App/etc. so they
+      don't have to retype it on this trip.
+
+    If a placeholder slot exists in this group (an empty "(Pending)" row from
+    a "I'm expecting N people" invite), we fill that one instead of creating
+    a duplicate row. This keeps the member count predictable.
+    """
     _require_group(group_id, user_id, db)
-    member = Member(group_id=group_id, name=body.name)
+
+    # If we're adding a real person and there's a placeholder slot waiting,
+    # fill that slot instead of creating a fresh row. Predictable member count.
+    placeholder = (
+        db.query(Member)
+        .filter_by(group_id=group_id, is_placeholder=True)
+        .order_by(Member.id.asc())
+        .first()
+    )
+    if placeholder:
+        placeholder.name = body.name
+        placeholder.is_placeholder = False
+        if body.user_id:
+            placeholder.user_id = body.user_id
+        if body.payment_handles:
+            placeholder.payment_handles = body.payment_handles.model_dump(exclude_none=True) or None
+        db.commit()
+        db.refresh(placeholder)
+        return placeholder
+
+    member = Member(
+        group_id=group_id,
+        name=body.name,
+        user_id=body.user_id or None,
+        payment_handles=(body.payment_handles.model_dump(exclude_none=True) if body.payment_handles else None) or None,
+    )
     db.add(member)
     db.commit()
     db.refresh(member)
@@ -1194,6 +1233,158 @@ def get_or_create_invite_link(
     return {"invite_code": group.invite_code, "invite_url": invite_url}
 
 
+def _ensure_invite_code(group: Group, db: Session) -> None:
+    """Generate the short alphanumeric invite code for this group if missing."""
+    if group.invite_code:
+        return
+    alphabet = string.ascii_uppercase + string.digits
+    for _ in range(10):
+        code = ''.join(secrets.choice(alphabet) for _ in range(8))
+        if not db.query(Group).filter_by(invite_code=code).first():
+            group.invite_code = code
+            db.commit()
+            db.refresh(group)
+            return
+    group.invite_code = str(_uuid_module.uuid4())
+    db.commit()
+    db.refresh(group)
+
+
+@router.post("/groups/{group_id}/invite-slots", response_model=InviteSlotsResponse)
+def create_invite_slots(
+    group_id: int,
+    body: InviteSlotsRequest,
+    request: Request,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """
+    Reserve N "(Pending)" placeholder member slots for the trip and return
+    the invite link to share. Used by the People sheet's "How many people
+    are you expecting?" flow.
+
+    Idempotent in spirit: callers pass the *target* total pending count.
+    If 1 placeholder already exists and `count=3`, we add 2 more so that
+    the final state is 3 pending. If `count=1` and 3 already exist, we
+    delete the 2 newest unclaimed ones. This makes the slider in the UI
+    behave predictably.
+    """
+    if body.count < 0 or body.count > 20:
+        raise HTTPException(status_code=400, detail="count must be between 0 and 20")
+
+    group = _require_group(group_id, user_id, db)
+    if group.owner_id and group.owner_id != user_id:
+        raise HTTPException(status_code=403, detail="Only the trip owner can manage invites.")
+
+    _ensure_invite_code(group, db)
+
+    existing = (
+        db.query(Member)
+        .filter_by(group_id=group_id, is_placeholder=True)
+        .order_by(Member.id.asc())
+        .all()
+    )
+    target = body.count
+    have = len(existing)
+
+    new_ids: list[int] = [m.id for m in existing]
+
+    if have < target:
+        # Add more placeholders
+        for _ in range(target - have):
+            ph = Member(
+                group_id=group_id,
+                name="(Pending)",
+                is_placeholder=True,
+            )
+            db.add(ph)
+            db.flush()
+            new_ids.append(ph.id)
+        db.commit()
+    elif have > target:
+        # Trim from the newest end (keep the oldest placeholders since they
+        # may already correspond to a friend the owner is waiting on)
+        to_delete = existing[target:]
+        for m in to_delete:
+            db.delete(m)
+        db.commit()
+        new_ids = new_ids[:target]
+
+    frontend_url = os.getenv("FRONTEND_URL", str(request.base_url).rstrip("/"))
+    invite_url = f"{frontend_url}/join/{group.invite_code}"
+    return InviteSlotsResponse(
+        invite_url=invite_url,
+        invite_code=group.invite_code,
+        placeholder_member_ids=new_ids,
+        total_pending=len(new_ids),
+    )
+
+
+@router.get("/me/recent-collaborators", response_model=List[RecentCollaborator])
+def list_recent_collaborators(
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+    limit: int = 8,
+):
+    """
+    Quick-add chips for the People sheet. Returns up to `limit` people the
+    current user has collaborated with on past trips, ordered by trip count
+    (most-collaborated first). The current user themselves is excluded.
+
+    Source of truth: every Member row in trips this user owns OR is a member
+    of, deduplicated by either user_id (if set) or by lowercased name.
+    """
+    # Trips the user is involved in (owner or member)
+    owned_ids = {g.id for g in db.query(Group.id).filter_by(owner_id=user_id).all()}
+    joined_ids = {m.group_id for m in db.query(Member.group_id).filter_by(user_id=user_id).all()}
+    trip_ids = owned_ids | joined_ids
+    if not trip_ids:
+        return []
+
+    # All members across those trips, joined to their Group for trip-name display
+    rows = (
+        db.query(Member, Group)
+        .join(Group, Member.group_id == Group.id)
+        .filter(Member.group_id.in_(trip_ids))
+        .filter(Member.is_placeholder.is_(False) if hasattr(Member, "is_placeholder") else True)
+        .order_by(Group.created_at.desc())
+        .all()
+    )
+
+    # Aggregate: key by user_id when present, else by lowercased name
+    bucket: dict[str, dict] = {}
+    for member, group in rows:
+        # Skip self
+        if member.user_id and member.user_id == user_id:
+            continue
+        # Skip the empty placeholder rows defensively
+        if member.is_placeholder or not (member.name or "").strip():
+            continue
+        key = ("u:" + member.user_id) if member.user_id else ("n:" + member.name.strip().lower())
+        entry = bucket.get(key)
+        if entry is None:
+            bucket[key] = {
+                "name": member.name.strip(),
+                "user_id": member.user_id,
+                "last_trip_name": group.name,
+                "last_trip_id": group.id,
+                "trip_count": 1,
+                "payment_handles": member.payment_handles or None,
+            }
+        else:
+            entry["trip_count"] += 1
+            # Prefer payment handles from the most recent trip if missing
+            if not entry["payment_handles"] and member.payment_handles:
+                entry["payment_handles"] = member.payment_handles
+            # Promote a user_id once we see one (auto-link path)
+            if not entry["user_id"] and member.user_id:
+                entry["user_id"] = member.user_id
+
+    # Sort: most trips first, ties broken by recency (already in row order)
+    items = sorted(bucket.values(), key=lambda e: -e["trip_count"])[:limit]
+    return [RecentCollaborator(**i) for i in items]
+
+
 @router.get("/invite/{invite_code}", response_model=InvitePreview)
 def get_invite_preview(
     invite_code: str,
@@ -1212,11 +1403,14 @@ def get_invite_preview(
 
     members = db.query(Member).filter_by(group_id=group.id).all()
 
-    # Only show unclaimed slots (members who haven't joined AutoSplit yet)
+    # Show unclaimed slots in the "I'm…" dropdown so the joiner can pick
+    # an existing name. Skip placeholders ("(Pending)" rows) — those are
+    # generic and would clutter the choice; the joiner just types their
+    # name and the join handler fills the next placeholder automatically.
     unclaimed = [
         {"id": m.id, "name": m.name}
         for m in members
-        if not m.user_id
+        if not m.user_id and not m.is_placeholder
     ]
 
     return InvitePreview(
@@ -1262,22 +1456,43 @@ def join_trip(
         )
 
     if body.member_id:
-        # Claiming an existing slot — verify it exists and isn't taken
+        # Claiming an explicit slot — verify it exists and isn't taken
         member = db.query(Member).filter_by(id=body.member_id, group_id=group.id).first()
         if not member:
             raise HTTPException(status_code=400, detail="That member wasn't found in this trip.")
         if member.user_id and member.user_id != user_id:
             raise HTTPException(status_code=400, detail="That member slot is already claimed by someone else.")
         member.user_id = user_id
+        # If they're claiming a placeholder, upgrade it with their real name
+        if member.is_placeholder and body.name and body.name.strip():
+            member.name = body.name.strip()
+            member.is_placeholder = False
         db.commit()
         db.refresh(member)
 
     elif body.name and body.name.strip():
-        # Adding themselves as a new member
-        member = Member(group_id=group.id, name=body.name.strip(), user_id=user_id)
-        db.add(member)
-        db.commit()
-        db.refresh(member)
+        # No specific slot picked — auto-fill the oldest "(Pending)" placeholder
+        # if one exists. This is the path most joiners take when the trip owner
+        # used "I'm expecting N people" instead of pre-naming each member.
+        placeholder = (
+            db.query(Member)
+            .filter_by(group_id=group.id, is_placeholder=True)
+            .order_by(Member.id.asc())
+            .first()
+        )
+        if placeholder:
+            placeholder.name = body.name.strip()
+            placeholder.is_placeholder = False
+            placeholder.user_id = user_id
+            db.commit()
+            db.refresh(placeholder)
+            member = placeholder
+        else:
+            # No placeholder waiting — fall back to creating a brand-new row.
+            member = Member(group_id=group.id, name=body.name.strip(), user_id=user_id)
+            db.add(member)
+            db.commit()
+            db.refresh(member)
 
     else:
         raise HTTPException(status_code=400, detail="Provide either member_id (to claim a slot) or name (to join as new member).")

@@ -57,6 +57,13 @@ class Member(Base):
     # Null = this member hasn't joined AutoSplit yet (they're just a name in the trip).
     user_id = Column(String, nullable=True, index=True)
 
+    # True for member rows created via "expected count" placeholders on the
+    # invite flow. The trip owner says "I'm expecting 3 people", we create 3
+    # empty rows so the UI shows visible "(Pending)" slots and the joiner
+    # auto-fills the next open one. Cleared when a real user claims it.
+    # Defaults to False/0 because most rows are real people.
+    is_placeholder = Column(Boolean, nullable=False, default=False)
+
     # Payment handles — used by the Settlement page to render one-tap "Pay
     # Anthony $142 on Venmo" deep links. JSON because the set of supported
     # apps will keep growing (Wise, Revolut, Apple Cash) and we don't want

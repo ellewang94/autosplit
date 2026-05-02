@@ -36,6 +36,38 @@ class MemberResponse(BaseModel):
     name: str
     has_account: bool = False   # True once this member claims their account via invite link
     payment_handles: Optional[PaymentHandles] = None
+    is_placeholder: bool = False   # True for "(Pending)" slots awaiting a joiner
+
+class MemberCreateAdvanced(BaseModel):
+    """
+    Used for the People sheet's "Add by name" + "Add from history" paths.
+    `user_id` lets the owner pre-link a known person from past trips so they
+    don't have to claim a slot via an invite link.
+    """
+    name: str
+    user_id: Optional[str] = None    # Supabase UUID, optional
+    payment_handles: Optional[PaymentHandles] = None  # carry-over from past trip
+
+class InviteSlotsRequest(BaseModel):
+    count: int   # 1..10, validated server-side
+
+class InviteSlotsResponse(BaseModel):
+    invite_url: str
+    invite_code: str
+    placeholder_member_ids: List[int]
+    total_pending: int
+
+class RecentCollaborator(BaseModel):
+    """
+    A person you've collaborated with on a past trip. Surfaced in the People
+    sheet so adding them again is one tap, not retyping a name.
+    """
+    name: str
+    user_id: Optional[str] = None
+    last_trip_name: str
+    last_trip_id: int
+    trip_count: int
+    payment_handles: Optional[PaymentHandles] = None
 
 
 # ─── Groups ───────────────────────────────────────────────────────────────────

@@ -59,8 +59,27 @@ export const api = {
   getGroup: (id) => request(`/groups/${id}`),
 
   // Members
-  addMember: (groupId, name) => request(`/groups/${groupId}/members`, {
-    method: 'POST', body: JSON.stringify({ name }),
+  // Add a member to the trip. The simple form (just a name) covers 90% of
+  // calls. The opts object lets the People sheet pre-link a known person from
+  // your trip history (user_id) and carry over their payment handles.
+  addMember: (groupId, name, opts = {}) => request(`/groups/${groupId}/members`, {
+    method: 'POST',
+    body: JSON.stringify({
+      name,
+      user_id: opts.user_id ?? null,
+      payment_handles: opts.payment_handles ?? null,
+    }),
+  }),
+
+  // People you've collaborated with on past trips — surfaced as quick-add
+  // chips in the People sheet so you don't retype a name for every new trip.
+  getRecentCollaborators: () => request('/me/recent-collaborators'),
+
+  // Reserve N "(Pending)" placeholder member slots and get the invite link.
+  // The UI calls this with the slider value the owner sets in the People sheet.
+  // Idempotent: pass the *target* total, not a delta.
+  createInviteSlots: (groupId, count) => request(`/groups/${groupId}/invite-slots`, {
+    method: 'POST', body: JSON.stringify({ count }),
   }),
   updateMember: (id, name) => request(`/members/${id}`, {
     method: 'PUT', body: JSON.stringify({ name }),

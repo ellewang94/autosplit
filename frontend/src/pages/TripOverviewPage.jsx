@@ -5,10 +5,12 @@ import { api } from '../api/client'
 import {
   Upload, List, TrendingUp, CheckCircle, AlertTriangle,
   Calendar, Users, ArrowRight, FileText, ChevronRight, Trash2,
-  Link2, Loader, Plus, Pencil, X, Copy, MessageCircle, UserCheck,
+  Loader, Plus, Pencil, X, Hourglass,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useAuth } from '../contexts/AuthContext'
+import PeopleSheet from '../components/PeopleSheet'
+import { PaymentHandlesEditor } from '../components/PaymentHandles'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -113,21 +115,19 @@ export default function TripOverviewPage() {
   const location = useLocation()
   const qc = useQueryClient()
   const [confirmDeleteStmtId, setConfirmDeleteStmtId] = useState(null)
-  // Inline "add first member" form that appears inside the empty-members banner.
-  // Auto-opens when navigating here right after trip creation (state.newTrip = true).
-  const [addingFirstMember, setAddingFirstMember] = useState(
+
+  // The unified People sheet replaces the old inline add-member form, the
+  // separate big "Invite your travel companions" card, and the small "+ Add"
+  // pill — all three flows now live behind one trigger.
+  // Auto-opens when navigating here right after trip creation so the user is
+  // immediately prompted to invite people instead of staring at an empty page.
+  const [peopleSheetOpen, setPeopleSheetOpen] = useState(
     () => location.state?.newTrip === true
   )
-  const [firstMemberName, setFirstMemberName] = useState('')
 
-  const addMember = useMutation({
-    mutationFn: (name) => api.addMember(groupId, name),
-    onSuccess: () => {
-      qc.invalidateQueries(['group', groupId])
-      setFirstMemberName('')
-      // Keep the form open so they can add more people one by one
-    },
-  })
+  // Which member is the user editing payment handles for? Set from the People
+  // sheet's per-member "Edit pay" button.
+  const [editingHandlesFor, setEditingHandlesFor] = useState(null)
 
   const deleteStatement = useMutation({
     mutationFn: (id) => api.deleteStatement(id),
@@ -157,12 +157,6 @@ export default function TripOverviewPage() {
   })
 
   const { user } = useAuth()
-  const [inviteCopied, setInviteCopied] = useState(false)
-  const [inviteLoading, setInviteLoading] = useState(false)
-  // Holds the fetched invite URL so we can display it in the card and offer share options
-  const [inviteUrl, setInviteUrl] = useState(null)
-  // Whether the prominent invite card is expanded (owner clicks it to reveal share options)
-  const [inviteOpen, setInviteOpen] = useState(false)
 
   // ── Inline date editor ────────────────────────────────────────────────────
   const [editingDates, setEditingDates] = useState(false)
@@ -191,52 +185,6 @@ export default function TripOverviewPage() {
 
   // True if the current user is the trip owner OR if it's a legacy group (no owner)
   const isOwner = !group?.owner_id || group.owner_id === user?.id
-
-  // Fetch or re-use the invite link, then copy to clipboard
-  async function handleInvite() {
-    setInviteLoading(true)
-    try {
-      const data = await api.getInviteLink(groupId)
-      setInviteUrl(data.invite_url)
-      await navigator.clipboard.writeText(data.invite_url)
-      setInviteCopied(true)
-      setTimeout(() => setInviteCopied(false), 3000)
-    } catch (e) {
-      console.error('Copy failed:', e)
-    } finally {
-      setInviteLoading(false)
-    }
-  }
-
-  // Open the invite card — fetches the link in the background so it's ready to copy/share
-  async function openInviteCard() {
-    setInviteOpen(true)
-    if (!inviteUrl) {
-      setInviteLoading(true)
-      try {
-        const data = await api.getInviteLink(groupId)
-        setInviteUrl(data.invite_url)
-      } catch (e) {
-        console.error('Failed to get invite link:', e)
-      } finally {
-        setInviteLoading(false)
-      }
-    }
-  }
-
-  // Share via WhatsApp deep link (works on mobile and desktop)
-  function shareWhatsApp() {
-    if (!inviteUrl) return
-    const text = encodeURIComponent(`Join our trip "${group?.name}" on AutoSplit — add your card statement so we can split expenses fairly: ${inviteUrl}`)
-    window.open(`https://wa.me/?text=${text}`, '_blank')
-  }
-
-  // Share via iMessage (tel: links open Messages on Mac/iPhone)
-  function shareMessages() {
-    if (!inviteUrl) return
-    const text = encodeURIComponent(`Join our trip "${group?.name}" on AutoSplit: ${inviteUrl}`)
-    window.open(`sms:?&body=${text}`, '_blank')
-  }
 
   // ── Compute stats from transactions ───────────────────────────────────────
   const excluded = transactions.filter(t => t.status === 'excluded')
@@ -333,137 +281,73 @@ export default function TripOverviewPage() {
             </div>
           )}
 
-          {/* Member avatars */}
-          <div className="flex items-center gap-1.5">
+          {/* ── Members row — single tap target opens the People sheet ─────
+              The whole row (avatars + names + +Add pill + pending count)
+              opens PeopleSheet, which handles add-by-name, quick-add from
+              past trips, and the invite link with expected count. */}
+          <button
+            onClick={() => setPeopleSheetOpen(true)}
+            className="flex items-center gap-2 px-2 -mx-2 py-1 rounded-lg
+                       hover:bg-ink-800/60 active:bg-ink-800 transition-colors
+                       text-left w-full md:w-auto"
+            title="Manage people on this trip"
+          >
             <Users size={13} className="text-ink-500" />
-            <div className="flex -space-x-1.5">
-              {members.map((m, i) => {
-                const initials = m.name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2)
-                return (
-                  <div
-                    key={m.id}
-                    title={m.name}
-                    className={clsx(
-                      'w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold border-2 border-ink-950',
-                      MEMBER_COLORS[i % MEMBER_COLORS.length]
-                    )}
-                  >
-                    {initials}
-                  </div>
-                )
-              })}
-            </div>
-            <span className="text-xs text-ink-500 ml-1">
-              {members.map(m => m.name).join(', ')}
-            </span>
-            {/* "+ Add" pill — one-click way to add another member without leaving the trip page.
-                Only shown when at least one member already exists; the empty-state banner
-                handles the first-member case. Clicking it opens the same shared form below. */}
-            {members.length > 0 && (
-              <button
-                onClick={() => setAddingFirstMember(true)}
-                className="ml-2 flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full border border-lime-400/30 text-lime-400 hover:bg-lime-400/10 hover:border-lime-400/50 transition-all"
-                title="Add another person to this trip"
-              >
-                <Plus size={11} />
-                Add
-              </button>
-            )}
-          </div>
-
-          {/* Invite card — only for trip owner. Prominent and actionable, not a tiny text link. */}
-          {isOwner && members.length > 0 && (
-            <div className="mt-4 w-full">
-              {!inviteOpen ? (
-                /* Collapsed state — shows as a clear call-to-action button */
-                <button
-                  onClick={openInviteCard}
-                  className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-lime-400/8 border border-lime-400/25 hover:bg-lime-400/12 hover:border-lime-400/40 transition-all text-left group"
-                >
-                  <div className="w-8 h-8 rounded-lg bg-lime-400/15 flex items-center justify-center flex-shrink-0 group-hover:bg-lime-400/25 transition-colors">
-                    <UserCheck size={15} className="text-lime-400" />
-                  </div>
-                  <div className="flex-1">
-                    <div className="text-sm font-medium text-ink-100">Invite your travel companions</div>
-                    <div className="text-xs text-ink-500 mt-0.5">
-                      Share a link so {members.length > 1 ? `all ${members.length} members` : 'your friend'} can upload their card statements
-                    </div>
-                  </div>
-                  <ChevronRight size={14} className="text-ink-500 flex-shrink-0 group-hover:text-lime-400 transition-colors" />
-                </button>
-              ) : (
-                /* Expanded state — full invite panel with copy + share options */
-                <div className="rounded-xl border border-lime-400/25 bg-ink-900 overflow-hidden animate-slide-up">
-                  {/* Header */}
-                  <div className="flex items-center justify-between px-4 py-3 border-b border-ink-800">
-                    <div className="flex items-center gap-2">
-                      <UserCheck size={14} className="text-lime-400" />
-                      <span className="text-sm font-medium text-ink-100">Invite your travel companions</span>
-                    </div>
-                    <button
-                      onClick={() => setInviteOpen(false)}
-                      className="text-ink-600 hover:text-ink-400 transition-colors"
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-
-                  <div className="p-4 space-y-3">
-                    <p className="text-xs text-ink-400 leading-relaxed">
-                      Anyone with this link can join the trip and upload their own card statement.
-                      They don't need an account — it takes 30 seconds.
-                    </p>
-
-                    {/* Link display + copy button */}
-                    <div className="flex items-center gap-2">
-                      <div className="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg bg-ink-800 border border-ink-700 min-w-0">
-                        <Link2 size={12} className="text-ink-500 flex-shrink-0" />
-                        {inviteLoading ? (
-                          <span className="text-xs text-ink-500 font-mono truncate">Getting link…</span>
-                        ) : inviteUrl ? (
-                          <span className="text-xs text-ink-300 font-mono truncate">{inviteUrl}</span>
-                        ) : (
-                          <span className="text-xs text-ink-600 italic">Failed to load link</span>
+            {members.length === 0 ? (
+              <span className="text-xs text-lime-400 font-medium flex items-center gap-1">
+                <Plus size={11} /> Add who's on this trip
+                <ChevronRight size={11} />
+              </span>
+            ) : (
+              <>
+                <div className="flex -space-x-1.5">
+                  {members.slice(0, 5).map((m, i) => {
+                    if (m.is_placeholder) {
+                      return (
+                        <div
+                          key={m.id}
+                          title="Pending invite"
+                          className="w-6 h-6 rounded-full bg-ink-800 border-2 border-ink-950 border-dashed flex items-center justify-center"
+                        >
+                          <Hourglass size={10} className="text-ink-500" />
+                        </div>
+                      )
+                    }
+                    const initials = (m.name || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2)
+                    return (
+                      <div
+                        key={m.id}
+                        title={m.name}
+                        className={clsx(
+                          'w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold border-2 border-ink-950',
+                          MEMBER_COLORS[i % MEMBER_COLORS.length]
                         )}
+                      >
+                        {initials}
                       </div>
-                      <button
-                        onClick={handleInvite}
-                        disabled={inviteLoading || !inviteUrl}
-                        className="flex-shrink-0 btn-primary text-xs py-2 px-3"
-                      >
-                        {inviteCopied ? (
-                          <><CheckCircle size={13} /> Copied!</>
-                        ) : (
-                          <><Copy size={13} /> Copy</>
-                        )}
-                      </button>
+                    )
+                  })}
+                  {members.length > 5 && (
+                    <div className="w-6 h-6 rounded-full bg-ink-700 border-2 border-ink-950 flex items-center justify-center text-[9px] font-bold text-ink-300">
+                      +{members.length - 5}
                     </div>
-
-                    {/* Quick share row */}
-                    <div className="flex items-center gap-2 pt-1">
-                      <span className="text-xs text-ink-600">Share via</span>
-                      <button
-                        onClick={shareWhatsApp}
-                        disabled={!inviteUrl}
-                        className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg bg-green-500/10 border border-green-500/20 text-green-400 hover:bg-green-500/20 transition-colors disabled:opacity-40"
-                      >
-                        <MessageCircle size={12} />
-                        WhatsApp
-                      </button>
-                      <button
-                        onClick={shareMessages}
-                        disabled={!inviteUrl}
-                        className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400 hover:bg-blue-500/20 transition-colors disabled:opacity-40"
-                      >
-                        <MessageCircle size={12} />
-                        iMessage
-                      </button>
-                    </div>
-                  </div>
+                  )}
                 </div>
-              )}
-            </div>
-          )}
+                <span className="text-xs text-ink-500 truncate max-w-[180px]">
+                  {members.filter(m => !m.is_placeholder).map(m => m.name).join(', ')}
+                  {members.some(m => m.is_placeholder) && (
+                    <span className="text-ink-600">
+                      {' '}· {members.filter(m => m.is_placeholder).length} pending
+                    </span>
+                  )}
+                </span>
+                <span className="ml-1 flex items-center gap-0.5 text-[11px] font-medium text-lime-400 hover:text-lime-300">
+                  <Plus size={10} />
+                  Add
+                </span>
+              </>
+            )}
+          </button>
         </div>
       </div>
 
@@ -529,82 +413,21 @@ export default function TripOverviewPage() {
       ─────────────────────────────────────────────────────────────────────── */}
       {(() => {
         // Determine what the most important next action is right now
-        // Priority 1: adding members.
-        // Show the expanded form if: the user opened it (addingFirstMember=true)
-        // OR if there are literally no members yet (force them to add at least one).
-        // Once at least one member exists and the user clicks "Done", we fall through.
-        if (addingFirstMember) {
-          return (
-            <div className="mb-6 rounded-xl bg-lime-400/8 border border-lime-400/25 px-4 py-4 animate-slide-up">
-              <div className="flex items-center gap-2 mb-3">
-                <Users size={14} className="text-lime-400" />
-                <span className="text-sm font-medium text-ink-100">Who's on this trip?</span>
-                <span className="text-xs text-ink-500 ml-1">Add yourself first, then your friends</span>
-              </div>
-
-              {/* Pill list of already-added members */}
-              {members.length > 0 && (
-                <div className="flex flex-wrap gap-2 mb-3">
-                  {members.map((m, i) => (
-                    <span key={m.id} className={`text-xs font-medium px-2.5 py-1 rounded-full ${['bg-lime-400/15 text-lime-400','bg-green-400/15 text-green-400','bg-amber-400/15 text-amber-400','bg-blue-400/15 text-blue-400'][i % 4]}`}>
-                      {m.name}
-                    </span>
-                  ))}
-                </div>
-              )}
-
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault()
-                  if (firstMemberName.trim()) {
-                    addMember.mutate(firstMemberName.trim())
-                    setFirstMemberName('')
-                  }
-                }}
-                className="flex gap-2"
-              >
-                <input
-                  className="input flex-1 text-sm py-2"
-                  placeholder="Name (e.g. Elle, Anthony…)"
-                  value={firstMemberName}
-                  onChange={(e) => setFirstMemberName(e.target.value)}
-                  autoFocus
-                />
-                <button
-                  type="submit"
-                  className="btn-primary py-2 px-3 text-sm"
-                  disabled={!firstMemberName.trim() || addMember.isPending}
-                >
-                  <Plus size={14} />
-                  Add
-                </button>
-              </form>
-
-              {/* Done — only show once at least one member exists */}
-              {members.length > 0 && (
-                <button
-                  className="mt-3 text-xs text-lime-400 hover:text-lime-300 transition-colors flex items-center gap-1.5"
-                  onClick={() => setAddingFirstMember(false)}
-                >
-                  <CheckCircle size={12} />
-                  Done adding people
-                </button>
-              )}
-            </div>
-          )
-        }
-
-        if (members.length === 0) {
-          // No members yet and form isn't open — collapsed prompt
+        // Priority 1: people. Open the People sheet from a single CTA when
+        // no real members exist yet. Pending placeholders don't satisfy this
+        // — we still want the user to add at least one real person before
+        // moving on to expenses.
+        const realMemberCount = members.filter((m) => !m.is_placeholder).length
+        if (realMemberCount === 0) {
           return (
             <button
               className="mb-6 w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-lime-400/8 border border-lime-400/20 hover:bg-lime-400/12 hover:border-lime-400/35 transition-all text-left animate-slide-up"
-              onClick={() => setAddingFirstMember(true)}
+              onClick={() => setPeopleSheetOpen(true)}
             >
               <Users size={15} className="text-lime-400 flex-shrink-0" />
               <div className="flex-1">
-                <span className="text-sm font-medium text-ink-100">Add your travel companions</span>
-                <span className="text-xs text-ink-400 ml-2">tap to add who's on this trip</span>
+                <span className="text-sm font-medium text-ink-100">Who's on this trip?</span>
+                <span className="text-xs text-ink-400 ml-2">add by name or share an invite link</span>
               </div>
               <ChevronRight size={14} className="text-ink-500 flex-shrink-0" />
             </button>
@@ -848,6 +671,29 @@ export default function TripOverviewPage() {
       {/* The previous "No statements yet" empty-state hero was duplicate
           messaging — the contextual banner above already prompts for the
           first import. Removed to reduce noise. */}
+
+      {/* People sheet — single surface for add-by-name, quick-add from past
+          trips, and the invite-link-with-expected-count flow. Triggered from
+          the clickable members row in the trip header. */}
+      {peopleSheetOpen && (
+        <PeopleSheet
+          group={group}
+          members={members}
+          isOwner={isOwner}
+          onClose={() => setPeopleSheetOpen(false)}
+          onEditHandles={(member) => setEditingHandlesFor(member)}
+        />
+      )}
+
+      {/* Payment handles editor — triggered from inside the People sheet.
+          Same modal we use on the Settlement page; isolated mounting here so
+          it overlays the People sheet without a z-index fight. */}
+      {editingHandlesFor && (
+        <PaymentHandlesEditor
+          member={editingHandlesFor}
+          onClose={() => setEditingHandlesFor(null)}
+        />
+      )}
     </div>
   )
 }
