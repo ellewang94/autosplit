@@ -1,10 +1,11 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 import {
   List, TrendingUp, AlertTriangle, Users, Check, X,
   ChevronDown, Search, CheckSquare, Square, Minus, Calendar, Plane, Download, Plus, Trash2, Pencil,
+  Camera, Sparkles, Loader,
 } from 'lucide-react'
 import clsx from 'clsx'
 
@@ -700,6 +701,57 @@ function AddExpenseModal({ groupId, members, group, onClose, onSaved }) {
   const [category, setCategory] = useState('')   // empty = auto-detect on backend
   const [error, setError] = useState('')
 
+  // ── Receipt OCR ───────────────────────────────────────────────────────────
+  // We give the user a "Snap a receipt" entry path that opens the phone
+  // camera (or file picker on desktop), uploads to Claude vision via
+  // /api/receipts/parse, and pre-fills every field we can. The user always
+  // reviews + edits before saving — never auto-submit.
+  const fileInputRef = useRef(null)
+  const [ocrLoading, setOcrLoading] = useState(false)
+  const [ocrResult, setOcrResult] = useState(null) // { confidence, notes } from last successful parse
+  const [ocrError, setOcrError] = useState('')
+
+  async function handleReceiptUpload(file) {
+    if (!file) return
+    setOcrLoading(true)
+    setOcrError('')
+    setOcrResult(null)
+    try {
+      const data = await api.parseReceipt(file)
+      // Only overwrite fields we got non-null answers for; keep user-typed
+      // values otherwise. Leaves the form behaviour predictable.
+      if (data.amount != null) setAmount(String(data.amount))
+      if (data.currency) {
+        // Only switch currency if the parsed one is in our supported list.
+        const upper = String(data.currency).toUpperCase()
+        if (CURRENCIES.includes(upper)) setCurrency(upper)
+      }
+      if (data.merchant) setDescription(data.merchant)
+      if (data.posted_date) setPostedDate(data.posted_date)
+      if (data.category) {
+        // Map Claude's looser category vocab to our supported set.
+        const map = {
+          dining: 'dining', coffee: 'dining', drinks: 'dining',
+          groceries: 'groceries',
+          transport: 'transportation', fuel: 'transportation',
+          lodging: 'travel',
+          entertainment: 'entertainment',
+          shopping: 'shopping',
+          other: 'unknown',
+        }
+        const mapped = map[data.category] || data.category
+        if (CATEGORIES.includes(mapped)) setCategory(mapped)
+      }
+      setOcrResult({ confidence: data.confidence, notes: data.notes })
+    } catch (err) {
+      setOcrError(err.message || 'Could not read this receipt.')
+    } finally {
+      setOcrLoading(false)
+      // Reset the input so picking the same file twice still triggers onChange
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
   // Split method: 'equal' | 'percentage' | 'exact'
   const [splitMode, setSplitMode] = useState('equal')
 
@@ -829,6 +881,84 @@ function AddExpenseModal({ groupId, members, group, onClose, onSaved }) {
         </div>
 
         <div className="px-6 py-5 space-y-4 overflow-y-auto">
+          {/* ── Snap-a-receipt shortcut ─────────────────────────────────────
+              On mobile, capture="environment" triggers the rear camera so
+              the user can photograph the paper receipt in front of them. On
+              desktop the same button just opens a file picker. The result
+              pre-fills every field below; the user reviews + edits before
+              saving. We never auto-submit on OCR — Claude can be wrong. */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="sr-only"
+            onChange={(e) => handleReceiptUpload(e.target.files?.[0])}
+          />
+          {!ocrResult && !ocrError && (
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={ocrLoading}
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl
+                         border border-dashed border-lime-400/40 bg-lime-400/5
+                         text-lime-400 font-semibold text-sm
+                         hover:bg-lime-400/10 hover:border-lime-400/60
+                         active:scale-[0.99] transition-all disabled:opacity-60"
+            >
+              {ocrLoading ? (
+                <>
+                  <Loader size={14} className="animate-spin" />
+                  Reading your receipt…
+                </>
+              ) : (
+                <>
+                  <Camera size={14} strokeWidth={2.5} />
+                  Snap a receipt — we'll fill it in
+                </>
+              )}
+            </button>
+          )}
+
+          {ocrResult && !ocrError && (
+            <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-lime-400/8 border border-lime-400/25">
+              <Sparkles size={13} className="text-lime-400 flex-shrink-0 mt-0.5" />
+              <div className="flex-1 text-xs text-ink-300 leading-relaxed">
+                <span className="font-semibold text-lime-400">Filled from your receipt</span>
+                {ocrResult.confidence < 0.7 && (
+                  <span className="text-amber-400"> · confidence is low — please double-check</span>
+                )}
+                {ocrResult.notes && (
+                  <div className="text-ink-500 mt-0.5">{ocrResult.notes}</div>
+                )}
+              </div>
+              <button
+                onClick={() => { setOcrResult(null); setOcrError(''); fileInputRef.current?.click() }}
+                className="text-xs text-lime-400 hover:text-lime-300 font-medium flex-shrink-0"
+                title="Try a different photo"
+              >
+                Retake
+              </button>
+            </div>
+          )}
+
+          {ocrError && (
+            <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-red-500/10 border border-red-500/30">
+              <AlertTriangle size={13} className="text-red-400 flex-shrink-0 mt-0.5" />
+              <div className="flex-1 text-xs text-ink-300 leading-relaxed">
+                <span className="font-semibold text-red-400">Couldn't read that receipt.</span>
+                {' '}
+                <span className="text-ink-400">{ocrError}</span>
+              </div>
+              <button
+                onClick={() => { setOcrError(''); fileInputRef.current?.click() }}
+                className="text-xs text-red-400 hover:text-red-300 font-medium flex-shrink-0"
+              >
+                Try again
+              </button>
+            </div>
+          )}
+
           {/* Date + Amount + Currency */}
           <div className="flex gap-3">
             <div className="flex-1">

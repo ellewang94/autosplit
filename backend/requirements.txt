@@ -16,3 +16,10 @@ python-dotenv==1.0.1
 stripe==11.4.0
 # Error tracking — catches crashes in production and sends them to Sentry
 sentry-sdk[fastapi]==2.19.2
+# Anthropic SDK — used by the receipt OCR endpoint to parse photos via Claude
+# vision. Pinned to a recent version that supports vision messages and the
+# Sonnet 4.6 / Opus 4.7 model family.
+anthropic==0.40.0
+# Pillow — used to validate and downscale uploaded receipt images before
+# sending them to Claude (smaller payload, faster + cheaper).
+Pillow==11.0.0

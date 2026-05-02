@@ -74,6 +74,28 @@ export const api = {
     method: 'PUT', body: JSON.stringify(handles),
   }),
 
+  // Receipt OCR — upload a receipt photo, get back structured fields the
+  // Add Expense form can pre-fill. Returns: { amount, currency, merchant,
+  // posted_date, category, items, confidence, notes }. Throws on parse
+  // failure; the modal will surface the message to the user.
+  // We hand-roll the fetch (instead of using `request`) because we need to
+  // send multipart/form-data and skip the JSON content-type header.
+  parseReceipt: async (file) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    const authHeader = await getAuthHeader()
+    const res = await fetch(`${BASE}/receipts/parse`, {
+      method: 'POST',
+      headers: { ...authHeader },     // do NOT set Content-Type — browser handles it for FormData
+      body: fd,
+    })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      throw new Error(body.detail || `Receipt parsing failed (HTTP ${res.status})`)
+    }
+    return res.json()
+  },
+
   // Statements
   getStatements: (groupId) => request(`/groups/${groupId}/statements`),
   deleteStatement: (id) => request(`/statements/${id}`, { method: 'DELETE' }),

@@ -282,6 +282,55 @@ def update_payment_handles(
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# RECEIPT OCR  —  photo of a receipt → pre-filled expense fields
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@router.post("/receipts/parse")
+async def parse_receipt_endpoint(
+    file: UploadFile = File(...),
+    user_id: str = Depends(get_current_user_id),
+):
+    """
+    Accept a receipt photo and return structured fields the frontend can use
+    to pre-fill the Add Expense form. Auth-only (no group_id) because this
+    is a stateless transform — we don't store anything; the user reviews
+    and saves manually.
+
+    Returns shape:
+        {
+            "amount":      number | null,
+            "currency":    "USD" | "EUR" | ... | null,
+            "merchant":    "Casa Tortillas" | null,
+            "posted_date": "2026-05-14" | null,
+            "category":    "dining" | ... | null,
+            "items":       [{name, amount}, ...],
+            "confidence":  0.0..1.0,
+            "notes":       "tip not shown — total may be pre-tip" | null
+        }
+    """
+    # Lazy import so the rest of the API still boots even if the SDK install
+    # is mid-deploy.
+    from services.receipt_ocr import parse_receipt, OCRError
+
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(
+            status_code=400,
+            detail="Receipt must be an image (PNG, JPEG, HEIC).",
+        )
+
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Empty file")
+
+    try:
+        return parse_receipt(raw)
+    except OCRError as e:
+        # Map all OCR failure modes to 422 — the request was syntactically valid
+        # but we couldn't extract anything useful.
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # STATEMENTS (PDF UPLOAD)
 # ═══════════════════════════════════════════════════════════════════════════════
 
