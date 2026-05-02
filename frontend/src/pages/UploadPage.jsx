@@ -455,11 +455,47 @@ export default function UploadPage() {
       </button>
 
       <h1 className="font-display text-2xl md:text-3xl font-semibold text-ink-50 tracking-tight mb-1">
-        Import Statements
+        Add Expenses
       </h1>
-      <p className="text-ink-400 text-sm mb-8">
-        Upload one or more bank statements — drop them all at once.
+      <p className="text-ink-400 text-sm mb-6">
+        Upload a bank statement, or type in expenses one by one.
       </p>
+
+      {/* ── Two paths: upload vs manual ──────────────────────────────────────────
+          Shown before the drop zone so new users immediately understand their options.
+          Manual entry is especially useful for invited friends with just a few expenses. */}
+      <div className="grid grid-cols-2 gap-3 mb-6">
+        {/* Upload path — highlighted as primary (most transactions) */}
+        <div className="card-sm border-lime-400/20 bg-lime-400/5">
+          <div className="flex items-start gap-2 mb-2">
+            <div className="w-7 h-7 rounded-lg bg-lime-400/15 flex items-center justify-center flex-shrink-0">
+              <FileText size={13} className="text-lime-400" />
+            </div>
+            <div>
+              <div className="text-sm font-semibold text-ink-100">Upload statement</div>
+              <div className="text-xs text-ink-500 mt-0.5 leading-relaxed">Best for many transactions — just drop a PDF or CSV from your bank</div>
+            </div>
+          </div>
+          <p className="text-[10px] text-lime-400/70 font-mono mt-2">↓ Form below</p>
+        </div>
+
+        {/* Manual path — secondary, but equal in importance for invited members */}
+        <button
+          className="card-sm text-left hover:border-ink-500 hover:bg-ink-800/60 transition-all group"
+          onClick={() => navigate(`/groups/${groupId}/transactions`, { state: { openAddExpense: true } })}
+        >
+          <div className="flex items-start gap-2 mb-2">
+            <div className="w-7 h-7 rounded-lg bg-ink-800 flex items-center justify-center flex-shrink-0 group-hover:bg-ink-700 transition-colors">
+              <Plus size={13} className="text-ink-400 group-hover:text-ink-200 transition-colors" />
+            </div>
+            <div>
+              <div className="text-sm font-semibold text-ink-100">Add manually</div>
+              <div className="text-xs text-ink-500 mt-0.5 leading-relaxed">Type in a few expenses — no file needed, takes 30 seconds</div>
+            </div>
+          </div>
+          <p className="text-[10px] text-ink-500 font-mono mt-2 group-hover:text-lime-400/60 transition-colors">Open expense form →</p>
+        </button>
+      </div>
 
       {/* ── Drop zone + queue — FIRST thing users see, primary action ─────────── */}
       <div className="card mb-4">

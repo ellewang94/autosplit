@@ -11,6 +11,8 @@ Pattern: validate input → call service → return response schema.
 import json
 import uuid as _uuid_module
 import os
+import secrets
+import string
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Header, Request
 from fastapi.responses import StreamingResponse
@@ -1068,9 +1070,19 @@ def get_or_create_invite_link(
     if group.owner_id and group.owner_id != user_id:
         raise HTTPException(status_code=403, detail="Only the trip owner can manage invite links.")
 
-    # Generate invite_code on first call
+    # Generate invite_code on first call.
+    # We use a short 8-character uppercase alphanumeric code (e.g. "K7MX2P3Q")
+    # instead of a full UUID, so the link is short enough to share over iMessage.
     if not group.invite_code:
-        group.invite_code = str(_uuid_module.uuid4())
+        alphabet = string.ascii_uppercase + string.digits
+        for _ in range(10):  # retry loop handles the tiny chance of collision
+            code = ''.join(secrets.choice(alphabet) for _ in range(8))
+            if not db.query(Group).filter_by(invite_code=code).first():
+                group.invite_code = code
+                break
+        else:
+            # Extremely unlikely: fall back to UUID if we somehow hit 10 collisions
+            group.invite_code = str(_uuid_module.uuid4())
         db.commit()
         db.refresh(group)
 

@@ -367,9 +367,9 @@ function CardHoldersSummary({ statements, members, groupId }) {
   )
 }
 
-// ── Share trip button + panel ────────────────────────────────────────────────
-// Shows after settlement is computed. Creates a public share link and lets
-// the user copy it or revoke it.
+// ── Share trip section ───────────────────────────────────────────────────────
+// Full-width CTA placed AFTER the settlement results — the natural "you're done,
+// now tell everyone" moment. Creates a public read-only link anyone can open.
 function SharePanel({ groupId, effectivePayerId }) {
   const [shareUrl, setShareUrl] = useState(null)
   const [copied, setCopied] = useState(false)
@@ -384,7 +384,6 @@ function SharePanel({ groupId, effectivePayerId }) {
       // Track the share creation — this is the key viral moment
       trackShareCreated(groupId)
     } catch (e) {
-      // Silently fail — share is non-critical
       console.error('Share failed:', e)
     } finally {
       setLoading(false)
@@ -406,49 +405,111 @@ function SharePanel({ groupId, effectivePayerId }) {
   function copyLink() {
     navigator.clipboard.writeText(shareUrl)
     setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    setTimeout(() => setCopied(false), 2500)
   }
 
+  // Helper: open a pre-filled iMessage / WhatsApp / plain SMS with the share link
+  function openMessaging(platform) {
+    const text = `Here's our trip settlement — tap to see what you owe: ${shareUrl}`
+    if (platform === 'whatsapp') {
+      window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank')
+    } else if (platform === 'imessage') {
+      window.open(`sms:&body=${encodeURIComponent(text)}`, '_blank')
+    }
+  }
+
+  // ── Before link is generated: invite-style CTA card ─────────────────────
   if (!shareUrl) {
     return (
-      <button
-        className="btn-secondary text-xs"
-        onClick={handleShare}
-        disabled={loading}
-      >
-        {loading ? <Loader size={12} className="animate-spin" /> : <Link2 size={12} />}
-        {loading ? 'Creating link…' : 'Share trip'}
-      </button>
+      <div className="mt-8 rounded-2xl border border-dashed border-ink-600 bg-ink-900/50 px-6 py-7 text-center">
+        <div className="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-lime-400/10 border border-lime-400/20 mb-4">
+          <Link2 size={18} className="text-lime-400" strokeWidth={1.5} />
+        </div>
+        <h3 className="font-display text-lg font-semibold text-ink-100 mb-1">Share with your group</h3>
+        <p className="text-sm text-ink-400 mb-5 max-w-sm mx-auto leading-relaxed">
+          Generate a link your friends can open to see the full breakdown — no sign-up required.
+        </p>
+        <button
+          onClick={handleShare}
+          disabled={loading}
+          className="btn-primary gap-2 mx-auto"
+        >
+          {loading ? <Loader size={14} className="animate-spin" /> : <Link2 size={14} />}
+          {loading ? 'Generating link…' : 'Generate share link'}
+        </button>
+      </div>
     )
   }
 
+  // ── After link is generated: show URL + quick-send shortcuts ────────────
   return (
-    <div className="flex items-center gap-2 bg-ink-800/60 border border-lime-400/20 rounded-xl px-3 py-2">
-      {/* Link icon */}
-      <Link2 size={12} className="text-lime-400 flex-shrink-0" />
-      {/* The URL — truncated but still shows domain */}
-      <span className="text-xs text-ink-300 font-mono truncate flex-1 min-w-0">
-        {shareUrl.replace(/^https?:\/\//, '')}
-      </span>
-      {/* Copy */}
-      <button
-        onClick={copyLink}
-        className={clsx('flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-lg transition-colors',
-          copied ? 'text-lime-400' : 'text-ink-400 hover:text-ink-200'
-        )}
-      >
-        {copied ? <CheckCircle size={11} /> : <Copy size={11} />}
-        {copied ? 'Copied!' : 'Copy'}
-      </button>
-      {/* Revoke */}
-      <button
-        onClick={handleRevoke}
-        disabled={revoking}
-        title="Revoke share link"
-        className="text-ink-600 hover:text-red-400 transition-colors p-1"
-      >
-        <Link2Off size={12} />
-      </button>
+    <div className="mt-8 rounded-2xl border border-lime-400/20 bg-lime-400/5 px-6 py-6">
+      {/* Header */}
+      <div className="flex items-center gap-2 mb-4">
+        <div className="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-lime-400/15">
+          <Link2 size={13} className="text-lime-400" />
+        </div>
+        <h3 className="font-display text-base font-semibold text-ink-100">Trip link ready</h3>
+        <span className="ml-auto text-[10px] text-lime-400/70 font-mono tracking-wider uppercase">Live</span>
+      </div>
+
+      {/* URL bar */}
+      <div className="flex items-center gap-2 bg-ink-900 border border-ink-700 rounded-xl px-3 py-2.5 mb-4">
+        <span className="text-xs text-ink-300 font-mono truncate flex-1 min-w-0">
+          {shareUrl.replace(/^https?:\/\//, '')}
+        </span>
+        <button
+          onClick={copyLink}
+          className={clsx(
+            'flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg transition-all',
+            copied
+              ? 'bg-lime-400/15 text-lime-400'
+              : 'bg-ink-700 hover:bg-ink-600 text-ink-300 hover:text-ink-100'
+          )}
+        >
+          {copied ? <CheckCircle size={11} /> : <Copy size={11} />}
+          {copied ? 'Copied!' : 'Copy'}
+        </button>
+      </div>
+
+      {/* Quick-send shortcuts */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs text-ink-500 mr-1">Send via:</span>
+        {/* WhatsApp */}
+        <button
+          onClick={() => openMessaging('whatsapp')}
+          className="flex items-center gap-1.5 text-xs text-ink-400 hover:text-ink-200
+                     bg-ink-800 hover:bg-ink-700 border border-ink-700 hover:border-ink-500
+                     px-3 py-1.5 rounded-lg transition-all"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" className="text-green-400">
+            <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+          </svg>
+          WhatsApp
+        </button>
+        {/* iMessage / SMS */}
+        <button
+          onClick={() => openMessaging('imessage')}
+          className="flex items-center gap-1.5 text-xs text-ink-400 hover:text-ink-200
+                     bg-ink-800 hover:bg-ink-700 border border-ink-700 hover:border-ink-500
+                     px-3 py-1.5 rounded-lg transition-all"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" className="text-blue-400">
+            <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/>
+          </svg>
+          iMessage
+        </button>
+        {/* Revoke — tucked at the end, low prominence */}
+        <button
+          onClick={handleRevoke}
+          disabled={revoking}
+          className="ml-auto flex items-center gap-1.5 text-xs text-ink-600 hover:text-red-400 transition-colors"
+          title="Disable this link"
+        >
+          <Link2Off size={11} />
+          {revoking ? 'Revoking…' : 'Revoke'}
+        </button>
+      </div>
     </div>
   )
 }
@@ -724,11 +785,6 @@ export default function SettlementPage() {
             </div>
           </div>
 
-          {/* Share trip — generates a public read-only link anyone can open */}
-          <div className="flex flex-wrap items-center gap-2 mb-6">
-            <SharePanel groupId={groupId} effectivePayerId={effectivePayerId} />
-          </div>
-
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Balances */}
             <div>
@@ -789,6 +845,9 @@ export default function SettlementPage() {
               </p>
             </div>
           )}
+
+          {/* Share trip — natural moment: user just saw all the owed amounts */}
+          <SharePanel groupId={groupId} effectivePayerId={effectivePayerId} />
 
           {/* Contextual feedback prompt — did the math look right? */}
           <SettlementFeedback groupId={groupId} />
