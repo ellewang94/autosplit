@@ -95,6 +95,11 @@ def run_migrations():
             ("transactions", "original_amount",  "FLOAT"),  # nullable, null = same as base
             # Statements table — bank name for display ("Alex's Chase — Jan–Apr 2026")
             ("statements",   "bank_name",        "VARCHAR"),
+            # Members table — payment app handles (Venmo, Cash App, PayPal, Zelle)
+            # used to render one-tap pay deep-links on the Settlement page.
+            # Stored as JSON; the Member model documents the schema. We use
+            # JSON (not JSONB) because SQLite + Postgres both speak it.
+            ("members", "payment_handles", "JSON"),
         ]
 
         for table, column, definition in new_columns:

@@ -3,8 +3,9 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { api } from '../api/client'
 import { trackSettlementComputed, trackShareCreated } from '../lib/analytics'
+import { PayButtons, PaymentHandlesEditor, EditHandlesButton } from '../components/PaymentHandles'
 import {
-  TrendingUp, ArrowRight, Copy, CheckCircle,
+  TrendingUp, ArrowRight, Copy, CheckCircle, Wallet,
   Users, DollarSign, AlertTriangle, ChevronDown, Loader,
   CreditCard, Check, ExternalLink, Link2, Link2Off,
   ThumbsUp, ThumbsDown, Send,
@@ -197,8 +198,12 @@ function BalanceCard({ balance, index, currency = 'USD' }) {
 // ── Transfer card ─────────────────────────────────────────────────────────────
 // groupId is needed to build a unique localStorage key per trip.
 // This prevents "paid" state from bleeding across different trips.
-function TransferCard({ transfer, index, currency = 'USD', groupId }) {
+function TransferCard({ transfer, index, currency = 'USD', groupId, members = [], onEditHandles }) {
   const [expanded, setExpanded] = useState(false)
+
+  // The payee (recipient) is the one whose handles we use to render Pay buttons.
+  // We find the full member object so we have access to .payment_handles.
+  const payee = members.find((m) => m.id === transfer.to_member_id)
 
   // Build a stable localStorage key for this specific transfer within this group.
   // We use names + amount so the key is human-readable and unique within the group.
@@ -271,6 +276,24 @@ function TransferCard({ transfer, index, currency = 'USD', groupId }) {
         <div className="mt-2 flex items-center gap-1.5 text-xs text-green-400 font-medium">
           <CheckCircle size={11} />
           Marked as paid · <button onClick={togglePaid} className="underline hover:text-green-300 transition-colors">Undo</button>
+        </div>
+      )}
+
+      {/* One-tap pay buttons — opens Venmo / Cash App / PayPal pre-filled.
+          Hidden once marked paid (no need to pay again). */}
+      {!paid && (
+        <div className="mt-3 pt-3 border-t border-ink-800 flex items-center justify-between gap-2 flex-wrap">
+          <PayButtons
+            payee={payee}
+            amount={transfer.amount}
+            memo={`AutoSplit: ${transfer.from_member_name} → ${transfer.to_member_name}`}
+          />
+          {payee && onEditHandles && (
+            <EditHandlesButton
+              member={payee}
+              onClick={() => onEditHandles(payee)}
+            />
+          )}
         </div>
       )}
 
@@ -533,6 +556,10 @@ export default function SettlementPage() {
   // Snapshot how many transactions existed at the time of the last computation.
   // If new transactions are added afterwards, we show a "stale" warning.
   const [txnCountAtCompute, setTxnCountAtCompute] = useState(null)
+
+  // Which member's payment handles is the user editing? null = editor closed.
+  // Triggered from any TransferCard (recipient) or directly from the toolbar.
+  const [editingHandlesFor, setEditingHandlesFor] = useState(null)
 
   const { data: group } = useQuery({
     queryKey: ['group', groupId],
@@ -814,15 +841,38 @@ export default function SettlementPage() {
               ) : (
                 <div className="space-y-2">
                   {settlement.transfers.map((t, i) => (
-                    <TransferCard key={i} transfer={t} index={i} currency={currency} groupId={groupId} />
+                    <TransferCard
+                      key={i}
+                      transfer={t}
+                      index={i}
+                      currency={currency}
+                      groupId={groupId}
+                      members={members}
+                      onEditHandles={setEditingHandlesFor}
+                    />
                   ))}
                 </div>
               )}
 
               {settlement.transfers.length > 0 && (
-                <div className="mt-4">
+                <div className="mt-4 flex items-center gap-3 flex-wrap">
                   <CopyButton text={settlement.transfers.map(t => t.payment_request).join('\n\n')} />
-                  <span className="text-xs text-ink-500 ml-2">Copy all messages</span>
+                  <span className="text-xs text-ink-500">Copy all messages</span>
+                  <span className="text-ink-700">·</span>
+                  {/* Quick entry to manage YOUR handles — even if no transfer is owed to you,
+                      you might want to add yours so the next trip already has it. */}
+                  <button
+                    className="flex items-center gap-1.5 text-xs text-ink-400 hover:text-lime-400 transition-colors"
+                    onClick={() => {
+                      // Default to the first member that's "self" if we can detect it,
+                      // otherwise fall back to opening the first member.
+                      const me = members[0]
+                      if (me) setEditingHandlesFor(me)
+                    }}
+                  >
+                    <Wallet size={12} />
+                    Manage payment handles
+                  </button>
                 </div>
               )}
             </div>
@@ -868,6 +918,15 @@ export default function SettlementPage() {
             }
           </p>
         </div>
+      )}
+
+      {/* Payment handles editor — opened from any TransferCard or the toolbar.
+          Self-contained sheet that mutates the member, then closes. */}
+      {editingHandlesFor && (
+        <PaymentHandlesEditor
+          member={editingHandlesFor}
+          onClose={() => setEditingHandlesFor(null)}
+        />
       )}
     </div>
   )

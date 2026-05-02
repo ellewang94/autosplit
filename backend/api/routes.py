@@ -22,7 +22,7 @@ from database import get_db
 from models.models import Group, Member, Statement, Transaction, MerchantRule, Feedback, TripShare
 from schemas.schemas import (
     GroupCreate, GroupResponse,
-    MemberCreate, MemberResponse,
+    MemberCreate, MemberResponse, PaymentHandles,
     StatementResponse, TransactionResponse, TransactionUpdate, BulkTransactionUpdate,
     MerchantRuleCreate, MerchantRuleResponse,
     SettlementRequest, SettlementResponse, UploadResponse,
@@ -227,6 +227,58 @@ def delete_member(
     db.delete(member)
     db.commit()
     return {"ok": True}
+
+
+@router.put("/members/{member_id}/payment-handles", response_model=MemberResponse)
+def update_payment_handles(
+    member_id: int,
+    body: PaymentHandles,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """
+    Update a member's payment app handles (Venmo, Cash App, PayPal, Zelle).
+
+    Authorisation rule: a user can edit a member's handles if they (a) own the
+    trip OR (b) have claimed that member slot via an invite link. This means
+    once a friend joins the trip and links their account, they own their
+    handles — Elle can't change them by mistake, and they can fix typos
+    themselves without asking the trip owner.
+    """
+    member = db.query(Member).filter_by(id=member_id).first()
+    if not member:
+        raise HTTPException(status_code=404, detail="Member not found")
+
+    group = db.query(Group).filter_by(id=member.group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+
+    is_owner = group.owner_id and group.owner_id == user_id
+    is_self = member.user_id and member.user_id == user_id
+    if not (is_owner or is_self):
+        raise HTTPException(status_code=403, detail="Not allowed to edit this member's payment handles")
+
+    # Normalise handles — strip leading @ / $ / whitespace so the frontend
+    # doesn't have to remember which app uses which prefix.
+    def clean(value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        v = value.strip().lstrip('@').lstrip('$')
+        return v or None
+
+    handles = {
+        "venmo":   clean(body.venmo),
+        "cashapp": clean(body.cashapp),
+        "paypal":  clean(body.paypal),
+        "zelle":   clean(body.zelle),
+    }
+    # Drop empty keys so the JSON stays tidy and we can render "no handles"
+    # cleanly on the client.
+    handles = {k: v for k, v in handles.items() if v}
+    member.payment_handles = handles or None
+    db.commit()
+    db.refresh(member)
+    return member
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

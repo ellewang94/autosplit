@@ -18,12 +18,24 @@ from typing import Optional, List, Any
 class MemberCreate(BaseModel):
     name: str
 
+class PaymentHandles(BaseModel):
+    """
+    Per-member payment app handles, used by the Settlement page to render
+    one-tap pay deep links. All optional. We strip leading @ / $ on save
+    so the frontend doesn't need to remember which app uses which prefix.
+    """
+    venmo: Optional[str] = None     # "anthony-w" (no @)
+    cashapp: Optional[str] = None   # "anthonyw" (no $)
+    paypal: Optional[str] = None    # "anthony@example.com" or "anthony-w" (paypal.me handle)
+    zelle: Optional[str] = None     # email or US phone — Zelle has no deep link, copy-helper only
+
 class MemberResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     group_id: int
     name: str
     has_account: bool = False   # True once this member claims their account via invite link
+    payment_handles: Optional[PaymentHandles] = None
 
 
 # ─── Groups ───────────────────────────────────────────────────────────────────

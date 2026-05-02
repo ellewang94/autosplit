@@ -57,6 +57,21 @@ class Member(Base):
     # Null = this member hasn't joined AutoSplit yet (they're just a name in the trip).
     user_id = Column(String, nullable=True, index=True)
 
+    # Payment handles — used by the Settlement page to render one-tap "Pay
+    # Anthony $142 on Venmo" deep links. JSON because the set of supported
+    # apps will keep growing (Wise, Revolut, Apple Cash) and we don't want
+    # to migrate the schema every time we add one.
+    #
+    # Schema:
+    #   {
+    #     "venmo":   "anthony-w",          # username (no @)
+    #     "cashapp": "anthonyw",           # cashtag (no $)
+    #     "paypal":  "anthony@example.com", # paypal.me handle OR email
+    #     "zelle":   "5551234567"          # email or phone (Zelle has no deep link;
+    #                                         we surface this as a copy-helper)
+    #   }
+    payment_handles = Column(JSON, nullable=True)
+
     @property
     def has_account(self) -> bool:
         """True if this member has linked their AutoSplit account."""

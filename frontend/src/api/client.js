@@ -67,6 +67,13 @@ export const api = {
   }),
   deleteMember: (id) => request(`/members/${id}`, { method: 'DELETE' }),
 
+  // Update a member's payment handles (Venmo, Cash App, PayPal, Zelle).
+  // Pass an object like { venmo: 'anthony-w', paypal: '...' } — server normalises
+  // (strips @ and $ prefixes) and stores. Returns the updated member.
+  updatePaymentHandles: (memberId, handles) => request(`/members/${memberId}/payment-handles`, {
+    method: 'PUT', body: JSON.stringify(handles),
+  }),
+
   // Statements
   getStatements: (groupId) => request(`/groups/${groupId}/statements`),
   deleteStatement: (id) => request(`/statements/${id}`, { method: 'DELETE' }),
