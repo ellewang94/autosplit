@@ -188,9 +188,20 @@ export default function JoinPage() {
         {!user ? (
           <div className="bg-ink-900 border border-ink-700 rounded-2xl overflow-hidden shadow-xl">
             <div className="px-6 pt-6 pb-5">
-              <p className="text-sm text-ink-300 mb-5 leading-relaxed">
+              <p className="text-sm text-ink-300 mb-3 leading-relaxed">
                 Sign in to join this trip and contribute your own expenses.
               </p>
+
+              {/* Trust-anchor mini banner — reassures the joiner before Google
+                  pops up showing our Supabase auth URL (which can look sketchy
+                  to non-technical visitors who don't know what Supabase is). */}
+              <div className="flex items-start gap-2 px-3 py-2 mb-4 rounded-lg bg-ink-800/50 border border-ink-700">
+                <CheckCircle size={12} className="text-lime-400 flex-shrink-0 mt-0.5" />
+                <p className="text-[11px] text-ink-400 leading-relaxed">
+                  Signing in is handled by Google. AutoSplit only sees your name and email.
+                  Takes about 5 seconds — nothing to download, no password to remember.
+                </p>
+              </div>
 
               {/* Google — primary */}
               <button
