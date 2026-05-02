@@ -1221,6 +1221,17 @@ export default function TransactionsPage() {
   // Whether the Add Expense modal is open
   const [showAddExpense, setShowAddExpense] = useState(false)
 
+  // First-time bulk-features tip — shown once per user, dismissible.
+  // This is our biggest competitive advantage (no other split app has it),
+  // so we surface it explicitly the first time the table has actual data.
+  const [showBulkTip, setShowBulkTip] = useState(
+    () => typeof window !== 'undefined' && !localStorage.getItem('autosplit_bulk_tip_seen')
+  )
+  function dismissBulkTip() {
+    try { localStorage.setItem('autosplit_bulk_tip_seen', '1') } catch {}
+    setShowBulkTip(false)
+  }
+
   // If we arrived here via the "Add expense manually" shortcut from TripOverview,
   // auto-open the modal so the user doesn't have to hunt for it.
   useEffect(() => {
@@ -1417,6 +1428,9 @@ export default function TransactionsPage() {
       next.has(id) ? next.delete(id) : next.add(id)
       return next
     })
+    // First selection means the user discovered the feature — quietly dismiss
+    // the educational tip so it doesn't keep nagging on later visits.
+    if (showBulkTip) dismissBulkTip()
   }
 
   /**
@@ -1674,6 +1688,35 @@ export default function TransactionsPage() {
             <span className="text-amber-400 font-medium">Set Participants</span>
             {' '}to resolve them all in one go.
           </p>
+        </div>
+      )}
+
+      {/* ── First-time "bulk edit is the point" tip ─────────────────────────
+          Shown once, per user, when they first see the populated table. The
+          competitive research is unambiguous: bulk operations are AutoSplit's
+          biggest UX moat (Splitwise has had a 13-year-old open feature
+          request for this — never shipped). We make sure new users *see* it. */}
+      {showBulkTip && transactions.length >= 3 && filter === 'all' && selectedIds.size === 0 && (
+        <div className="mb-3 flex items-start gap-3 px-4 py-3 rounded-xl bg-lime-400/8 border border-lime-400/25 animate-slide-up">
+          <div className="w-7 h-7 rounded-lg bg-lime-400/15 flex items-center justify-center flex-shrink-0 mt-0.5">
+            <CheckSquare size={13} className="text-lime-400" />
+          </div>
+          <div className="flex-1 min-w-0 text-xs text-ink-300 leading-relaxed">
+            <div className="text-sm font-semibold text-ink-100 mb-0.5">
+              Bulk edit is AutoSplit's superpower
+            </div>
+            Tick the box on any row (or the header to select all) to change
+            <span className="text-lime-400 font-medium"> category</span>,
+            <span className="text-lime-400 font-medium"> who splits it</span>,
+            confirm, or exclude — for many transactions at once. No other splitter does this.
+          </div>
+          <button
+            onClick={dismissBulkTip}
+            className="flex-shrink-0 p-1 -mr-1 -mt-1 text-ink-500 hover:text-ink-200 transition-colors"
+            aria-label="Dismiss tip"
+          >
+            <X size={14} />
+          </button>
         </div>
       )}
 
