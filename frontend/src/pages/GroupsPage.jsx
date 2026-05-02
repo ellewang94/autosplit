@@ -258,6 +258,7 @@ function CreateGroupForm({ onDone }) {
   const [endDate, setEndDate] = useState('')
   const [baseCurrency, setBaseCurrency] = useState('USD')  // default to USD
   const qc = useQueryClient()
+  const navigate = useNavigate()
 
   const create = useMutation({
     mutationFn: () => api.createGroup(
@@ -266,15 +267,13 @@ function CreateGroupForm({ onDone }) {
       endDate || null,
       baseCurrency,        // settlement currency for this trip
     ),
-    onSuccess: () => {
+    onSuccess: (data) => {
       qc.invalidateQueries(['groups'])
-      setName('')
-      setStartDate('')
-      setEndDate('')
-      setBaseCurrency('USD')
       // Track the new trip event — tells us how many trips active users create
       trackTripCreated()
-      onDone?.()
+      // Go straight into the new trip so the user can add members immediately.
+      // Pass newTrip=true so TripOverviewPage auto-opens the add-member form.
+      navigate(`/groups/${data.id}`, { state: { newTrip: true } })
     },
   })
 

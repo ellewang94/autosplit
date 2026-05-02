@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 import {
@@ -110,8 +110,24 @@ function WorkflowCard({ icon: Icon, title, description, status, cta, onClick, di
 export default function TripOverviewPage() {
   const { groupId } = useParams()
   const navigate = useNavigate()
+  const location = useLocation()
   const qc = useQueryClient()
   const [confirmDeleteStmtId, setConfirmDeleteStmtId] = useState(null)
+  // Inline "add first member" form that appears inside the empty-members banner.
+  // Auto-opens when navigating here right after trip creation (state.newTrip = true).
+  const [addingFirstMember, setAddingFirstMember] = useState(
+    () => location.state?.newTrip === true
+  )
+  const [firstMemberName, setFirstMemberName] = useState('')
+
+  const addMember = useMutation({
+    mutationFn: (name) => api.addMember(groupId, name),
+    onSuccess: () => {
+      qc.invalidateQueries(['group', groupId])
+      setFirstMemberName('')
+      // Keep the form open so they can add more people one by one
+    },
+  })
 
   const deleteStatement = useMutation({
     mutationFn: (id) => api.deleteStatement(id),
@@ -296,7 +312,7 @@ export default function TripOverviewPage() {
               </div>
               {/* Explain what trip dates actually do — surfaced here where users edit them */}
               <p className="text-xs text-amber-400/80 pl-5">
-                Transactions outside these dates will be auto-excluded from settlement — so you don't accidentally split your regular grocery runs.
+                Everyday spending outside these dates (groceries, dining, etc.) is auto-excluded. Travel charges — flights, hotels, car rentals — booked up to 90 days before or 14 days after your trip are surfaced for review instead.
               </p>
             </div>
           ) : (
@@ -340,6 +356,19 @@ export default function TripOverviewPage() {
             <span className="text-xs text-ink-500 ml-1">
               {members.map(m => m.name).join(', ')}
             </span>
+            {/* "+ Add" pill — one-click way to add another member without leaving the trip page.
+                Only shown when at least one member already exists; the empty-state banner
+                handles the first-member case. Clicking it opens the same shared form below. */}
+            {members.length > 0 && (
+              <button
+                onClick={() => setAddingFirstMember(true)}
+                className="ml-2 flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full border border-lime-400/30 text-lime-400 hover:bg-lime-400/10 hover:border-lime-400/50 transition-all"
+                title="Add another person to this trip"
+              >
+                <Plus size={11} />
+                Add
+              </button>
+            )}
           </div>
 
           {/* Invite card — only for trip owner. Prominent and actionable, not a tiny text link. */}
@@ -469,14 +498,26 @@ export default function TripOverviewPage() {
       {/* Only shown to members who joined via invite link and haven't uploaded yet.
           The isOwner check comes from group.owner_id vs the current user's ID. */}
       {!isOwner && !hasStatements && (
-        <div className="bg-lime-400/8 border border-lime-400/20 rounded-2xl px-5 py-4 mb-6 flex items-start gap-3 animate-slide-up">
-          <Upload size={16} className="text-lime-400 flex-shrink-0 mt-0.5" />
-          <div>
-            <div className="text-sm font-medium text-ink-100 mb-1">You've joined this trip</div>
-            <div className="text-xs text-ink-400 leading-relaxed">
-              Upload your card statement so your expenses are included in the final settlement.
-              Select yourself as the card holder when prompted.
-            </div>
+        <div className="bg-lime-400/8 border border-lime-400/20 rounded-2xl px-5 py-4 mb-6 animate-slide-up">
+          <div className="text-sm font-medium text-ink-100 mb-1">You've joined this trip</div>
+          <div className="text-xs text-ink-400 leading-relaxed mb-3">
+            Add your expenses so they're included in the final settlement. You can upload a bank statement or type them in manually.
+          </div>
+          <div className="flex gap-2">
+            <button
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-lime-400 text-ink-950 text-xs font-semibold hover:bg-lime-500 transition-colors"
+              onClick={() => navigate(`/groups/${groupId}/upload`)}
+            >
+              <Upload size={11} />
+              Upload statement
+            </button>
+            <button
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-ink-600 text-ink-300 text-xs font-medium hover:border-ink-400 hover:bg-ink-800/50 transition-all"
+              onClick={() => navigate(`/groups/${groupId}/transactions`, { state: { openAddExpense: true } })}
+            >
+              <Plus size={11} />
+              Add manually
+            </button>
           </div>
         </div>
       )}
@@ -488,29 +529,110 @@ export default function TripOverviewPage() {
       ─────────────────────────────────────────────────────────────────────── */}
       {(() => {
         // Determine what the most important next action is right now
-        if (members.length === 0) {
+        // Priority 1: adding members.
+        // Show the expanded form if: the user opened it (addingFirstMember=true)
+        // OR if there are literally no members yet (force them to add at least one).
+        // Once at least one member exists and the user clicks "Done", we fall through.
+        if (addingFirstMember) {
           return (
-            <div className="mb-6 flex items-center gap-3 px-4 py-3 rounded-xl bg-lime-400/8 border border-lime-400/20 animate-slide-up">
+            <div className="mb-6 rounded-xl bg-lime-400/8 border border-lime-400/25 px-4 py-4 animate-slide-up">
+              <div className="flex items-center gap-2 mb-3">
+                <Users size={14} className="text-lime-400" />
+                <span className="text-sm font-medium text-ink-100">Who's on this trip?</span>
+                <span className="text-xs text-ink-500 ml-1">Add yourself first, then your friends</span>
+              </div>
+
+              {/* Pill list of already-added members */}
+              {members.length > 0 && (
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {members.map((m, i) => (
+                    <span key={m.id} className={`text-xs font-medium px-2.5 py-1 rounded-full ${['bg-lime-400/15 text-lime-400','bg-green-400/15 text-green-400','bg-amber-400/15 text-amber-400','bg-blue-400/15 text-blue-400'][i % 4]}`}>
+                      {m.name}
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  if (firstMemberName.trim()) {
+                    addMember.mutate(firstMemberName.trim())
+                    setFirstMemberName('')
+                  }
+                }}
+                className="flex gap-2"
+              >
+                <input
+                  className="input flex-1 text-sm py-2"
+                  placeholder="Name (e.g. Elle, Anthony…)"
+                  value={firstMemberName}
+                  onChange={(e) => setFirstMemberName(e.target.value)}
+                  autoFocus
+                />
+                <button
+                  type="submit"
+                  className="btn-primary py-2 px-3 text-sm"
+                  disabled={!firstMemberName.trim() || addMember.isPending}
+                >
+                  <Plus size={14} />
+                  Add
+                </button>
+              </form>
+
+              {/* Done — only show once at least one member exists */}
+              {members.length > 0 && (
+                <button
+                  className="mt-3 text-xs text-lime-400 hover:text-lime-300 transition-colors flex items-center gap-1.5"
+                  onClick={() => setAddingFirstMember(false)}
+                >
+                  <CheckCircle size={12} />
+                  Done adding people
+                </button>
+              )}
+            </div>
+          )
+        }
+
+        if (members.length === 0) {
+          // No members yet and form isn't open — collapsed prompt
+          return (
+            <button
+              className="mb-6 w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-lime-400/8 border border-lime-400/20 hover:bg-lime-400/12 hover:border-lime-400/35 transition-all text-left animate-slide-up"
+              onClick={() => setAddingFirstMember(true)}
+            >
               <Users size={15} className="text-lime-400 flex-shrink-0" />
               <div className="flex-1">
                 <span className="text-sm font-medium text-ink-100">Add your travel companions</span>
-                <span className="text-xs text-ink-400 ml-2">so AutoSplit knows who's splitting each expense</span>
+                <span className="text-xs text-ink-400 ml-2">tap to add who's on this trip</span>
               </div>
-            </div>
+              <ChevronRight size={14} className="text-ink-500 flex-shrink-0" />
+            </button>
           )
         }
         if (!hasStatements) {
           return (
-            <div
-              className="mb-6 flex items-center gap-3 px-4 py-3 rounded-xl bg-lime-400/8 border border-lime-400/20 animate-slide-up cursor-pointer hover:bg-lime-400/12 transition-colors"
-              onClick={() => navigate(`/groups/${groupId}/upload`)}
-            >
-              <Upload size={15} className="text-lime-400 flex-shrink-0" />
-              <div className="flex-1">
-                <span className="text-sm font-medium text-ink-100">Upload your first statement</span>
-                <span className="text-xs text-ink-400 ml-2">PDF or CSV from any major bank</span>
+            <div className="mb-6 rounded-xl bg-lime-400/8 border border-lime-400/20 overflow-hidden animate-slide-up">
+              <div className="px-4 py-3">
+                <p className="text-sm font-medium text-ink-100 mb-1">Add your expenses</p>
+                <p className="text-xs text-ink-500 mb-3">Pick whichever way works best for you</p>
+                <div className="flex gap-2">
+                  <button
+                    className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-lime-400 text-ink-950 text-xs font-semibold hover:bg-lime-500 transition-colors"
+                    onClick={() => navigate(`/groups/${groupId}/upload`)}
+                  >
+                    <Upload size={12} />
+                    Upload statement
+                  </button>
+                  <button
+                    className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-ink-600 text-ink-300 text-xs font-medium hover:border-ink-400 hover:bg-ink-800/50 transition-all"
+                    onClick={() => navigate(`/groups/${groupId}/transactions`, { state: { openAddExpense: true } })}
+                  >
+                    <Plus size={12} />
+                    Add manually
+                  </button>
+                </div>
               </div>
-              <ChevronRight size={14} className="text-ink-500 flex-shrink-0" />
             </div>
           )
         }
@@ -553,21 +675,21 @@ export default function TripOverviewPage() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-8">
         <WorkflowCard
           icon={Upload}
-          title="Import Statement"
+          title="Add Expenses"
           description={
             hasStatements
-              ? `${statements.filter(s => !s.is_manual).length} statement${statements.filter(s => !s.is_manual).length > 1 ? 's' : ''} imported`
-              : 'Upload a PDF or CSV statement, or add cash expenses manually'
+              ? `${statements.filter(s => !s.is_manual).length} statement${statements.filter(s => !s.is_manual).length > 1 ? 's' : ''} imported · manually added expenses also count`
+              : 'Upload a bank statement or type in a few expenses — both work'
           }
           status={importStatus}
-          cta={hasStatements ? 'Import another' : 'Get started'}
+          cta={hasStatements ? 'Add more expenses' : 'Get started'}
           onClick={() => navigate(`/groups/${groupId}/upload`)}
         />
         <WorkflowCard
           icon={List}
           title="Review Transactions"
           description={
-            !hasStatements ? 'Import a statement first'
+            !hasStatements ? 'Add some expenses first'
             : needsReview.length > 0
               ? `${needsReview.length} transaction${needsReview.length > 1 ? 's' : ''} need participant assignment`
               : 'All transactions reviewed'
