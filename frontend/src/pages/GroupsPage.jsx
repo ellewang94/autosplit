@@ -446,7 +446,7 @@ export default function GroupsPage() {
           <div className="grid grid-cols-3 gap-3">
             {[
               { step: '1', title: 'Create a trip', desc: 'Name it, add your travel dates and who\'s coming' },
-              { step: '2', title: 'Import statements', desc: 'Upload PDF or CSV from Chase, Amex, BofA, and more' },
+              { step: '2', title: 'Add expenses', desc: 'Upload a statement, snap a receipt, or type one in — your call' },
               { step: '3', title: 'Settle up', desc: 'AutoSplit calculates the fairest way to balance everything' },
             ].map(({ step, title, desc }) => (
               <div key={step} className="card-sm text-center">
