@@ -715,23 +715,24 @@ export default function TripOverviewPage() {
         />
       </div>
 
-      {/* ── Add expense manually — prominent shortcut ─────────────────────── */}
-      {/* Airbnb bookings, cash meals, Ubers paid by one person — these often
-          aren't on a credit card statement. This button surfaces the manual
-          entry flow so users don't miss it. It opens the Add Expense modal
-          on the transactions page via navigation state. */}
-      <div className="flex items-center justify-between mb-6 px-1">
-        <p className="text-xs text-ink-500 leading-relaxed">
-          Have an Airbnb, cash meal, or shared cost not on any card?
-        </p>
-        <button
-          className="flex items-center gap-1.5 text-xs font-semibold text-lime-400 hover:text-lime-300 transition-colors ml-4 flex-shrink-0"
-          onClick={() => navigate(`/groups/${groupId}/transactions`, { state: { openAddExpense: true } })}
-        >
-          <Plus size={12} />
-          Add expense manually
-        </button>
-      </div>
+      {/* ── Add expense manually — only shown once they have statements ───── */}
+      {/* Pre-statement, the contextual banner above already offers the manual path,
+          so showing this here too creates noise. Once at least one statement is in,
+          this becomes a meaningful escape hatch for cash / Airbnb / off-card costs. */}
+      {hasStatements && (
+        <div className="flex items-center justify-between mb-6 px-1">
+          <p className="text-xs text-ink-500 leading-relaxed">
+            Have an Airbnb, cash meal, or shared cost not on any card?
+          </p>
+          <button
+            className="flex items-center gap-1.5 text-xs font-semibold text-lime-400 hover:text-lime-300 transition-colors ml-4 flex-shrink-0"
+            onClick={() => navigate(`/groups/${groupId}/transactions`, { state: { openAddExpense: true } })}
+          >
+            <Plus size={12} />
+            Add expense manually
+          </button>
+        </div>
+      )}
 
       {/* ── Imported statements list ──────────────────────────────────────── */}
       {hasStatements && (
@@ -844,23 +845,9 @@ export default function TripOverviewPage() {
         </div>
       )}
 
-      {/* ── Empty state — no statements yet ──────────────────────────────── */}
-      {!hasStatements && (
-        <div className="card text-center py-12 border-dashed border-ink-700 animate-slide-up">
-          <Upload size={32} className="text-ink-600 mx-auto mb-3" strokeWidth={1.5} />
-          <p className="font-display text-lg text-ink-300 mb-1">No statements yet</p>
-          <p className="text-sm text-ink-500 mb-5">
-            Upload a bank statement (PDF or CSV) from Chase, Amex, BofA, Citi, and more — or add expenses manually.
-          </p>
-          <button
-            className="btn-primary mx-auto"
-            onClick={() => navigate(`/groups/${groupId}/upload`)}
-          >
-            <Upload size={14} />
-            Import Statement or Add Manually
-          </button>
-        </div>
-      )}
+      {/* The previous "No statements yet" empty-state hero was duplicate
+          messaging — the contextual banner above already prompts for the
+          first import. Removed to reduce noise. */}
     </div>
   )
 }

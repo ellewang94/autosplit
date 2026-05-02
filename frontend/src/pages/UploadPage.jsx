@@ -476,7 +476,6 @@ export default function UploadPage() {
               <div className="text-xs text-ink-500 mt-0.5 leading-relaxed">Best for many transactions — just drop a PDF or CSV from your bank</div>
             </div>
           </div>
-          <p className="text-[10px] text-lime-400/70 font-mono mt-2">↓ Form below</p>
         </div>
 
         {/* Manual path — secondary, but equal in importance for invited members */}
@@ -493,7 +492,6 @@ export default function UploadPage() {
               <div className="text-xs text-ink-500 mt-0.5 leading-relaxed">Type in a few expenses — no file needed, takes 30 seconds</div>
             </div>
           </div>
-          <p className="text-[10px] text-ink-500 font-mono mt-2 group-hover:text-lime-400/60 transition-colors">Open expense form →</p>
         </button>
       </div>
 

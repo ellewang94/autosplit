@@ -154,7 +154,7 @@ function GroupNav({ groupId, onNavigate }) {
 
   const links = [
     { to: `/groups/${groupId}`, icon: LayoutDashboard, label: 'Overview', exact: true },
-    { to: `/groups/${groupId}/upload`, icon: Upload, label: 'Import Statement' },
+    { to: `/groups/${groupId}/upload`, icon: Upload, label: 'Add Expenses' },
     { to: `/groups/${groupId}/transactions`, icon: List, label: 'Transactions' },
     { to: `/groups/${groupId}/settlement`, icon: TrendingUp, label: 'Settlement' },
   ]
