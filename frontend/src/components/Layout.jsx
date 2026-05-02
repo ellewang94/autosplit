@@ -3,6 +3,7 @@ import { Outlet, NavLink, Link, useLocation } from 'react-router-dom'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { api } from '../api/client'
 import { useAuth } from '../contexts/AuthContext'
+import InstallPrompt from './InstallPrompt'
 import {
   Users, Upload, List, TrendingUp, ChevronRight, Zap, LayoutDashboard, Menu, X,
   MessageSquare, CheckCircle, Bug, Lightbulb, HelpCircle, LogOut, User, Shield,
@@ -384,6 +385,10 @@ export default function Layout() {
           currentPage={location.pathname}
         />
       )}
+
+      {/* PWA install prompt — only shows on mobile when not already installed
+          and when the user hasn't dismissed it recently. */}
+      <InstallPrompt />
     </div>
   )
 }

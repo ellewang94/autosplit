@@ -50,6 +50,23 @@ const queryClient = new QueryClient({
   },
 })
 
+// ── PWA service worker registration ──────────────────────────────────────────
+// Registers /sw.js so Chrome considers AutoSplit "installable" and surfaces
+// the Add-to-Home-Screen prompt. The SW itself is intentionally minimal — see
+// public/sw.js for the rationale (we don't want stale money data).
+//
+// Only register in production and when the browser supports it. In local dev
+// we skip registration so HMR works without a stale SW intercepting requests.
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch((err) => {
+      // Non-fatal — the app still works without the SW; we just lose the
+      // Chrome install prompt. Log so we can spot regressions in Sentry.
+      console.warn('[autosplit] SW registration failed:', err)
+    })
+  })
+}
+
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>

@@ -3,7 +3,27 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="alternate icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+    <!-- viewport-fit=cover lets the page paint into the iOS notch and safe-area gutters.
+         The app already pads its content for env(safe-area-inset-*), so we get an
+         edge-to-edge native feel when installed as a PWA. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+
+    <!-- ── PWA / installable web app ─────────────────────────────────────── -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#0a0a0f" />
+    <meta name="application-name" content="AutoSplit" />
+    <!-- iOS Safari treats these meta tags as PWA hints — Apple ignores most
+         of the manifest, so we duplicate the important bits here. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="AutoSplit" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/icon-180.png" />
+    <link rel="apple-touch-icon" sizes="167x167" href="/icon-167.png" />
+    <link rel="apple-touch-icon" sizes="152x152" href="/icon-152.png" />
+    <link rel="apple-touch-icon" sizes="120x120" href="/icon-120.png" />
+
     <title>AutoSplit — Split Group Trip Expenses Automatically</title>
     <meta name="description" content="Upload your credit card statement, AutoSplit figures out who owes what. The fastest way to settle group trip expenses." />
 
