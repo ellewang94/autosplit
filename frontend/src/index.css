@@ -12,11 +12,37 @@
     scroll-behavior: smooth;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    /* iOS rotation should not auto-resize fonts */
+    -webkit-text-size-adjust: 100%;
   }
 
   body {
     @apply bg-ink-950 text-ink-100 font-sans;
     min-height: 100vh;
+    /* Use the dynamic viewport so iOS Safari's collapsing toolbar doesn't
+       leave dead space at the bottom on mobile. */
+    min-height: 100dvh;
+    /* Honour iOS safe-area insets so content doesn't sit under the home
+       indicator / notch. Pages override top padding when they have their
+       own header. */
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* Inputs at <16px trigger zoom on iOS Safari. Force 16px on touch
+     devices and let utility classes shrink it back on larger screens. */
+  @media (max-width: 640px) {
+    input[type="text"],
+    input[type="email"],
+    input[type="password"],
+    input[type="number"],
+    input[type="date"],
+    input[type="search"],
+    input[type="tel"],
+    input[type="url"],
+    select,
+    textarea {
+      font-size: 16px;
+    }
   }
 
   /* Thin scrollbar */
@@ -144,4 +170,49 @@
 /* Drop zone highlight */
 .drop-zone-active {
   @apply border-lime-400 bg-lime-400/5;
+}
+
+/* ── Mobile patterns ─────────────────────────────────────── */
+
+/* Floating action button — used on mobile-first screens (Transactions,
+   Add expense). 56px is the Material/HIG sweet spot for thumb reach. */
+.fab {
+  @apply fixed z-30 w-14 h-14 rounded-full
+         bg-lime-400 text-ink-950
+         flex items-center justify-center
+         shadow-lg shadow-lime-400/30 active:scale-95
+         transition-all duration-150;
+  /* Park above the iOS home bar */
+  bottom: calc(1rem + env(safe-area-inset-bottom));
+  right: 1rem;
+}
+
+/* Bottom sheet — slide-up modal that feels native on phones. Pairs with
+   the .sheet-backdrop overlay for a complete pattern. Falls back to a
+   centred dialog above the sm breakpoint via responsive utility classes
+   on the consumer. */
+.sheet {
+  @apply fixed inset-x-0 bottom-0 z-50
+         bg-ink-900 border-t border-ink-700 rounded-t-3xl
+         max-h-[92dvh] overflow-y-auto
+         shadow-2xl;
+  padding-bottom: env(safe-area-inset-bottom);
+  animation: sheet-up 0.22s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+@keyframes sheet-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+/* The little grab handle at the top of every bottom sheet. Pure
+   visual cue — the sheet doesn't actually drag-to-dismiss yet. */
+.sheet-handle {
+  @apply mx-auto mt-2 mb-1 w-10 h-1 rounded-full bg-ink-600;
+}
+
+/* Respect the iOS safe-area on the sticky bulk-action bar so it doesn't
+   sit under the home indicator. */
+.safe-bottom {
+  padding-bottom: calc(0.75rem + env(safe-area-inset-bottom));
 }

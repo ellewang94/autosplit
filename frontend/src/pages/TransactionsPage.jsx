@@ -402,15 +402,24 @@ function EditTransactionModal({ transaction, members, baseCurrency, onClose }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/60 backdrop-blur-sm"
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
-      <div className="bg-ink-900 border border-ink-700 rounded-2xl shadow-2xl w-full max-w-md mx-4 animate-slide-up max-h-[90vh] flex flex-col">
+      <div
+        className="bg-ink-900 border-t md:border border-ink-700
+                   rounded-t-3xl md:rounded-2xl shadow-2xl
+                   w-full max-w-md md:mx-4 animate-slide-up
+                   max-h-[92dvh] md:max-h-[90vh] flex flex-col"
+        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+      >
+        {/* Sheet grab handle — visual cue on mobile only */}
+        <div className="md:hidden mx-auto mt-2 mb-1 w-10 h-1 rounded-full bg-ink-600 flex-shrink-0" />
+
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-ink-800 flex-shrink-0">
           <h2 className="font-display text-lg font-semibold text-ink-50">Edit Transaction</h2>
-          <button onClick={onClose} className="text-ink-400 hover:text-ink-200 transition-colors">
-            <X size={18} />
+          <button onClick={onClose} className="p-1 -mr-1 text-ink-400 hover:text-ink-200 transition-colors">
+            <X size={20} />
           </button>
         </div>
 
@@ -792,18 +801,30 @@ function AddExpenseModal({ groupId, members, group, onClose, onSaved }) {
   const currencySymbol = CURRENCY_SYMBOLS[currency] || currency + ' '
 
   return (
-    // Dark overlay — clicking outside closes the modal
+    // Dark overlay — clicking outside closes the modal.
+    // On mobile we anchor to the bottom so it slides up like a native sheet;
+    // on tablet/desktop we centre it as a regular dialog.
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/60 backdrop-blur-sm"
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
-      {/* Scrollable inner container — the form can be tall when many members have percentage inputs */}
-      <div className="bg-ink-900 border border-ink-700 rounded-2xl shadow-2xl w-full max-w-md mx-4 animate-slide-up max-h-[90vh] flex flex-col">
+      {/* Scrollable inner container — bottom sheet on mobile, centred dialog above sm.
+          dvh respects iOS Safari's collapsing toolbar so the form is fully reachable. */}
+      <div
+        className="bg-ink-900 border-t md:border border-ink-700
+                   rounded-t-3xl md:rounded-2xl shadow-2xl
+                   w-full max-w-md md:mx-4 animate-slide-up
+                   max-h-[92dvh] md:max-h-[90vh] flex flex-col"
+        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+      >
+        {/* Sheet grab handle — visual cue on mobile only */}
+        <div className="md:hidden mx-auto mt-2 mb-1 w-10 h-1 rounded-full bg-ink-600 flex-shrink-0" />
+
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-ink-800 flex-shrink-0">
+        <div className="flex items-center justify-between px-6 py-4 md:py-4 border-b border-ink-800 flex-shrink-0">
           <h2 className="font-display text-lg font-semibold text-ink-50">Add Expense</h2>
-          <button onClick={onClose} className="text-ink-500 hover:text-ink-200 transition-colors">
-            <X size={18} />
+          <button onClick={onClose} className="p-1 -mr-1 text-ink-500 hover:text-ink-200 transition-colors">
+            <X size={20} />
           </button>
         </div>
 
@@ -1443,9 +1464,12 @@ export default function TransactionsPage() {
             <Download size={13} />
             Export CSV
           </button>
-          {/* Add a single expense manually — no statement upload needed */}
+          {/* Add a single expense manually — desktop entry point.
+              On mobile this is duplicated by the floating + button at the bottom-right
+              (see end of return), so we hide this one on small screens to keep the
+              header airy. */}
           <button
-            className="btn-secondary text-xs"
+            className="btn-secondary text-xs hidden md:inline-flex"
             onClick={() => setShowAddExpense(true)}
             title="Manually add a cash or card expense"
           >
@@ -2061,13 +2085,32 @@ export default function TransactionsPage() {
         />
       )}
 
+      {/* ── Floating "+" button — mobile-only ───────────────────────────────────
+          Opens Add Expense from anywhere on the page with thumb-reach.
+          Hidden when the bulk-action bar is up (would compete for attention)
+          and on tablet/desktop where the header button is reachable. */}
+      {members.length > 0 && selectedIds.size === 0 && (
+        <button
+          className="md:hidden fab"
+          onClick={() => setShowAddExpense(true)}
+          aria-label="Add expense"
+          title="Add expense"
+        >
+          <Plus size={24} strokeWidth={2.5} />
+        </button>
+      )}
+
       {/* ── Sticky bulk action bar ─────────────────────────────────────────────
           Floats at the bottom of the viewport when rows are selected.
           Fixed positioning avoids the page-jump that happened when the bar
-          appeared inline and pushed content down. z-40 sits below modals (z-50). */}
+          appeared inline and pushed content down. z-40 sits below modals (z-50).
+          On iOS, the inline padding-bottom keeps it clear of the home indicator. */}
       {selectedIds.size > 0 && (
-        <div className="fixed bottom-0 left-0 right-0 z-40 flex justify-center pointer-events-none">
-          <div className="pointer-events-auto mb-4 mx-4 w-full max-w-3xl flex items-center gap-2 px-4 py-2.5
+        <div
+          className="fixed bottom-0 left-0 right-0 z-40 flex justify-center pointer-events-none"
+          style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+        >
+          <div className="pointer-events-auto mb-3 mx-3 w-full max-w-3xl flex items-center gap-2 px-3 py-2.5
                           bg-ink-800/95 backdrop-blur-sm border border-lime-400/25 rounded-2xl shadow-2xl
                           shadow-black/40 flex-wrap animate-slide-up">
             <span className="text-xs font-mono text-lime-400 font-semibold">
