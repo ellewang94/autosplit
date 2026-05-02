@@ -13,6 +13,7 @@ import { useEffect } from 'react'
 import {
   Zap, Upload, CheckCircle, Share2, ArrowRight, CreditCard,
   Globe, Users, FileText, TrendingUp, X, Clock, AlertTriangle,
+  CheckSquare, Camera, Wallet,
 } from 'lucide-react'
 
 // ── Subtle dot-grid background — adds texture without noise ────────────────
@@ -321,12 +322,34 @@ export default function LandingPage() {
                 { icon: Share2, label: 'Shareable links' },
                 { icon: CheckCircle, label: 'Custom splits' },
                 { icon: Globe, label: 'Multi-currency' },
+                { icon: CheckSquare, label: 'Bulk edit' },
+                { icon: Camera, label: 'Receipt OCR' },
+                { icon: Wallet, label: 'Pay via Venmo / Cash App / PayPal / Zelle' },
               ].map(({ icon: Icon, label }) => (
                 <div key={label} className="flex items-center gap-1.5 bg-ink-800 border border-ink-700 rounded-full px-2.5 py-1">
                   <Icon size={10} className="text-lime-400" />
                   <span className="text-[11px] text-ink-300 font-medium">{label}</span>
                 </div>
               ))}
+            </div>
+          </div>
+        </div>
+
+        {/* ── Bulk-edit moat callout ─────────────────────────────────────────
+            This is the single feature no other split app has. We say it
+            plainly so visitors comparing alternatives see the difference. */}
+        <div className="mt-4 rounded-2xl border border-lime-400/25 bg-lime-400/5 p-5 sm:p-6">
+          <div className="flex items-start gap-3">
+            <div className="w-9 h-9 rounded-xl bg-lime-400/15 flex items-center justify-center flex-shrink-0">
+              <CheckSquare size={16} className="text-lime-400" strokeWidth={2} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <h3 className="font-display text-base sm:text-lg font-semibold text-ink-100 mb-1">
+                Edit dozens of transactions in one click
+              </h3>
+              <p className="text-sm text-ink-400 leading-relaxed">
+                Tick the boxes, set the category, change who's splitting, mark them all paid. Other split apps make you fix one row at a time &mdash; we let you fix forty.
+              </p>
             </div>
           </div>
         </div>
