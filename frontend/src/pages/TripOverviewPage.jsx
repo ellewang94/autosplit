@@ -32,6 +32,76 @@ function formatDateShort(iso) {
   return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
+const CURRENCY_SYMBOLS = {
+  USD: '$', AUD: 'A$', NZD: 'NZ$', JPY: '¥', GBP: '£', EUR: '€',
+  CAD: 'C$', SGD: 'S$', HKD: 'HK$', THB: '฿', MXN: 'Mex$',
+}
+
+// ── "Where I stand" balance widget ────────────────────────────────────────────
+// One-line read of the current user's personal balance for this trip — the
+// thing Splitwise users open the app to check. We hit a lightweight backend
+// endpoint so the math always matches what the Settlement page would show.
+function MyBalanceWidget({ groupId }) {
+  const navigate = useNavigate()
+  const { data, isLoading } = useQuery({
+    queryKey: ['my-balance', groupId],
+    queryFn: () => api.getMyBalance(groupId),
+    // Cheap on the backend, safe to refetch on focus to stay current.
+    staleTime: 15_000,
+  })
+
+  if (isLoading || !data || !data.linked) return null
+
+  const sym = CURRENCY_SYMBOLS[data.currency] || data.currency + ' '
+  const fmt = (n) => `${sym}${Math.abs(n).toLocaleString('en-US', {
+    minimumFractionDigits: data.currency === 'JPY' ? 0 : 2,
+    maximumFractionDigits: data.currency === 'JPY' ? 0 : 2,
+  })}`
+
+  // Split into three visual states: you're owed (green), you owe (amber),
+  // settled-up (muted). Showing both numbers below the headline mimics
+  // Splitwise's "$320 paid · $158.50 your share" breakdown that helps
+  // users trust the math.
+  const isOwed = data.net > 0.01
+  const owes = data.net < -0.01
+  const accent = isOwed ? 'lime-400' : owes ? 'amber-400' : 'ink-400'
+  const headline = isOwed
+    ? `You're owed ${fmt(data.net)}`
+    : owes
+      ? `You owe ${fmt(data.net)}`
+      : `You're settled up`
+
+  return (
+    <button
+      onClick={() => navigate(`/groups/${groupId}/settlement`)}
+      className={clsx(
+        'mb-6 w-full rounded-2xl px-5 py-4 text-left animate-slide-up transition-all',
+        'border bg-ink-900 hover:bg-ink-800/60',
+        isOwed && 'border-lime-400/30 hover:border-lime-400/50',
+        owes && 'border-amber-400/30 hover:border-amber-400/50',
+        !isOwed && !owes && 'border-ink-700 hover:border-ink-600',
+      )}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-[10px] font-mono uppercase tracking-widest text-ink-500 mb-1">
+            Where you stand
+          </div>
+          <div className={`font-display text-2xl font-bold text-${accent}`}>
+            {headline}
+          </div>
+          <div className="text-xs text-ink-500 mt-1 font-mono">
+            You paid <span className="text-ink-300">{fmt(data.you_paid)}</span>
+            {' · '}
+            Your share <span className="text-ink-300">{fmt(data.your_share)}</span>
+          </div>
+        </div>
+        <ChevronRight size={18} className={`text-${accent} flex-shrink-0`} />
+      </div>
+    </button>
+  )
+}
+
 // ── Stat card ─────────────────────────────────────────────────────────────────
 
 function StatCard({ label, value, sub, color }) {
@@ -377,6 +447,13 @@ export default function TripOverviewPage() {
           />
         </div>
       )}
+
+      {/* ── "Where I stand" balance summary ──────────────────────────────────
+          Splitwise's signature feature: a one-line read of your personal
+          balance the moment you open a trip. Shown only when there are real
+          transactions and the current user is linked to a member slot
+          (otherwise the math is meaningless). */}
+      {hasTransactions && <MyBalanceWidget groupId={groupId} />}
 
       {/* ── Joined-member guidance banner ─────────────────────────────────── */}
       {/* Only shown to members who joined via invite link and haven't uploaded yet.

@@ -935,6 +935,115 @@ def get_settlement(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.get("/groups/{group_id}/my-balance")
+def get_my_balance(
+    group_id: int,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """
+    Lightweight "Where I stand" summary for the trip overview header.
+
+    Returns the current user's net position in this trip:
+        {
+          "currency": "USD",
+          "you_paid":   320.00,   # what they paid (their card + their manual entries)
+          "your_share": 158.50,   # their share of all shared expenses
+          "net":        161.50,   # positive = you're owed, negative = you owe
+          "linked":     true      # false if the user hasn't claimed a member slot
+        }
+
+    This is fast: it reuses compute_net_balances under the hood with
+    statement_payers already wired up. We don't run the min-flow algorithm
+    (no transfers needed) — just the per-member balance for this user.
+    """
+    _require_group(group_id, user_id, db)
+
+    # Find the member row that's linked to this user. If they haven't claimed
+    # a slot yet (e.g. trip owner who hasn't added themselves as a member),
+    # there's no balance to show — return zeros + linked:false.
+    me = (
+        db.query(Member)
+        .filter_by(group_id=group_id, user_id=user_id)
+        .first()
+    )
+    group = db.query(Group).filter_by(id=group_id).first()
+    currency = (group.base_currency if group else "USD") or "USD"
+
+    if not me:
+        return {
+            "currency": currency,
+            "you_paid": 0.0,
+            "your_share": 0.0,
+            "net": 0.0,
+            "linked": False,
+        }
+
+    # Reuse the same balance math as the full settlement endpoint.
+    from domain.settlement import compute_net_balances
+
+    members = db.query(Member).filter_by(group_id=group_id).all()
+    all_member_ids = [m.id for m in members]
+
+    statements = db.query(Statement).filter_by(group_id=group_id).all()
+    statement_payers = {s.id: s.card_holder_member_id for s in statements if s.card_holder_member_id}
+    stmt_ids = [s.id for s in statements]
+
+    txns = (
+        db.query(Transaction)
+        .filter(Transaction.statement_id.in_(stmt_ids))
+        .all()
+        if stmt_ids else []
+    )
+    shared = [
+        t for t in txns
+        if t.status != "excluded"
+        and not t.is_personal
+        and t.participants_json
+        and t.participants_json.get("member_ids")
+    ]
+
+    # payer_member_id is the fallback for statements without a card holder.
+    # We just use the current user as a safe default — affects only unassigned
+    # statement charges, and the result is filtered to *me* anyway.
+    balances = compute_net_balances(shared, me.id, all_member_ids, statement_payers)
+    net = round(balances.get(me.id, 0.0), 2)
+
+    # Decompose net into "you paid" vs "your share" so the UI can show both
+    # numbers ("You paid $320, your share is $158.50") rather than just net.
+    you_paid = 0.0
+    your_share = 0.0
+    for t in shared:
+        amt = float(t.amount or 0.0)
+        # Did this transaction credit me?
+        statement_payer = statement_payers.get(t.statement_id)
+        # For statements with a card holder, that's the payer. For manual
+        # transactions stored on a virtual statement without one, the txn's
+        # paid_by is captured implicitly via statement_payers when the manual
+        # service sets it. Otherwise we conservatively skip the credit.
+        if statement_payer == me.id:
+            you_paid += amt
+        # My share of the cost
+        pids = t.participants_json.get("member_ids") or []
+        if me.id in pids:
+            split = (t.split_method_json or {}).get("type", "equal")
+            if split == "equal":
+                your_share += amt / max(1, len(pids))
+            elif split == "percentage":
+                pct = (t.split_method_json or {}).get("percentages", {}).get(str(me.id), 0)
+                your_share += amt * (float(pct) / 100.0)
+            elif split == "exact":
+                your_share += float((t.split_method_json or {}).get("amounts", {}).get(str(me.id), 0))
+
+    return {
+        "currency": currency,
+        "you_paid": round(you_paid, 2),
+        "your_share": round(your_share, 2),
+        "net": net,
+        "linked": True,
+    }
+
+
 @router.post("/groups/{group_id}/settlement/export-csv")
 def export_csv(
     group_id: int,

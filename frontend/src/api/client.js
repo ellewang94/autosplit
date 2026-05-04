@@ -81,6 +81,11 @@ export const api = {
   createInviteSlots: (groupId, count) => request(`/groups/${groupId}/invite-slots`, {
     method: 'POST', body: JSON.stringify({ count }),
   }),
+
+  // "Where I stand" balance for the trip overview header. Returns the current
+  // user's net position (positive = owed, negative = you owe) plus paid/share
+  // breakdown. Returns linked:false if user hasn't claimed a member slot yet.
+  getMyBalance: (groupId) => request(`/groups/${groupId}/my-balance`),
   updateMember: (id, name) => request(`/members/${id}`, {
     method: 'PUT', body: JSON.stringify({ name }),
   }),
