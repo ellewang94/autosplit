@@ -124,16 +124,24 @@ def run_migrations():
         # type then can't query `WHERE is_placeholder IS FALSE` against an
         # INTEGER, returning 500s on add-member and recent-collaborators.
         # Convert in-place if needed; harmless no-op if already BOOLEAN.
+        #
+        # The dance: drop the integer DEFAULT, change the column type, re-add
+        # a boolean DEFAULT. Doing it as one statement fails because Postgres
+        # complains that the existing DEFAULT (0) doesn't match the new type.
+        # Each step is wrapped separately so a partial completion still
+        # leaves the DB in a workable state.
         if _IS_POSTGRES:
-            try:
-                conn.execute(text(
-                    "ALTER TABLE members "
-                    "ALTER COLUMN is_placeholder TYPE BOOLEAN "
-                    "USING is_placeholder::boolean"
-                ))
-                conn.commit()
-            except Exception:
-                conn.rollback()
+            for sql in (
+                "ALTER TABLE members ALTER COLUMN is_placeholder DROP DEFAULT",
+                "ALTER TABLE members ALTER COLUMN is_placeholder TYPE BOOLEAN USING is_placeholder::boolean",
+                "ALTER TABLE members ALTER COLUMN is_placeholder SET DEFAULT FALSE",
+                "ALTER TABLE members ALTER COLUMN is_placeholder SET NOT NULL",
+            ):
+                try:
+                    conn.execute(text(sql))
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
 
         # Create the trip_shares table if it doesn't exist yet.
         # We can't use ALTER TABLE for a whole new table, so we use CREATE TABLE IF NOT EXISTS.
