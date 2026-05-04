@@ -238,11 +238,11 @@ export default function PeopleSheet({ group, members, isOwner, onClose, onEditHa
                         </span>
                       </div>
                     </div>
-                    <div className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:transition-opacity">
+                    <div className="flex items-center gap-1">
                       {/* "Claim as me" — visible only when this member is
                           unclaimed AND the signed-in user hasn't already
                           taken another seat in this trip. Always visible
-                          (not hover-only) so it's discoverable. */}
+                          (no hover gate) so it's discoverable on touch. */}
                       {!m.user_id && user && !userClaimed && (
                         <button
                           onClick={() => claimSlot.mutate(m.id)}
@@ -262,12 +262,14 @@ export default function PeopleSheet({ group, members, isOwner, onClose, onEditHa
                           Edit pay
                         </button>
                       )}
+                      {/* Remove stays hover-gated on desktop — it's destructive,
+                          and we don't want a stray tap to nuke a friend's seat. */}
                       {isOwner && (
                         <button
                           onClick={() => {
                             if (window.confirm(`Remove ${m.name} from this trip?`)) removeMember.mutate(m.id)
                           }}
-                          className="text-ink-600 hover:text-red-400 p-1 rounded transition-colors"
+                          className="text-ink-600 hover:text-red-400 p-1 rounded transition-colors opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
                           title="Remove from trip"
                         >
                           <X size={13} />
