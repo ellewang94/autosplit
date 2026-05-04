@@ -101,7 +101,13 @@ def _save_parsed_statement(
     db.flush()
 
     # ── Load context for categorization ──────────────────────────────────────
-    members = db.query(Member).filter_by(group_id=group_id).all()
+    # Exclude placeholder seats from auto-split — same rule as manual entry.
+    members = (
+        db.query(Member)
+        .filter_by(group_id=group_id)
+        .filter(Member.is_placeholder.is_(False) if hasattr(Member, "is_placeholder") else True)
+        .all()
+    )
     all_member_ids = [m.id for m in members]
 
     rules = {
@@ -438,7 +444,15 @@ def create_manual_transaction(
         category, _ = categorize(description)
 
     # ── Determine who splits this expense ─────────────────────────────────────
-    members = db.query(Member).filter_by(group_id=group_id).all()
+    # Exclude placeholder ('Pending') seats from auto-split — they haven't
+    # joined yet and shouldn't be charged. Once a friend claims the slot,
+    # they're a real member and future expenses default-include them.
+    members = (
+        db.query(Member)
+        .filter_by(group_id=group_id)
+        .filter(Member.is_placeholder.is_(False) if hasattr(Member, "is_placeholder") else True)
+        .all()
+    )
     all_member_ids = [m.id for m in members]
 
     if not participants_json:

@@ -50,14 +50,21 @@ def compute_settlement(
     """
 
     # ── Fetch members ────────────────────────────────────────────────────────
-    members = db.query(Member).filter_by(group_id=group_id).all()
+    # Exclude placeholders from settlement — they haven't joined yet, can't owe
+    # money, can't receive money. If a previous transaction's participants_json
+    # includes a placeholder ID (created before we filtered placeholders out of
+    # auto-split), we'll also strip it per-transaction below.
+    all_members = db.query(Member).filter_by(group_id=group_id).all()
+    members = [m for m in all_members if not getattr(m, "is_placeholder", False)]
     member_lookup = {m.id: m.name for m in members}
     all_member_ids = [m.id for m in members]
+    real_member_ids = set(all_member_ids)
 
     if not members:
         raise ValueError("Group has no members")
     if payer_member_id not in member_lookup:
-        raise ValueError(f"Member {payer_member_id} is not in group {group_id}")
+        # Fall back to first real member if the requested payer is a placeholder
+        payer_member_id = all_member_ids[0]
 
     # ── Fetch transactions ───────────────────────────────────────────────────
     if statement_id is not None:
@@ -85,13 +92,23 @@ def compute_settlement(
     #   "unreviewed" = still being reviewed, but included in settlement
     #   "confirmed"  = user approved, included
     #   "excluded"   = user said "not shared" — skip entirely
-    shared_transactions = [
-        t for t in transactions
-        if t.status != "excluded"
-        and not t.is_personal
-        and t.participants_json
-        and t.participants_json.get("member_ids")
-    ]
+    shared_transactions = []
+    for t in transactions:
+        if t.status == "excluded" or t.is_personal:
+            continue
+        pjson = t.participants_json or {}
+        ids = pjson.get("member_ids") or []
+        # Strip any placeholder IDs that may have been recorded back when
+        # placeholders were auto-included in the participant list. A txn
+        # that ends up with no real participants gets dropped.
+        real_ids = [i for i in ids if i in real_member_ids]
+        if not real_ids:
+            continue
+        if real_ids != ids:
+            # Mutate a shallow copy so we don't write back to the DB but the
+            # downstream balance calc sees the cleaned list.
+            t.participants_json = {**pjson, "member_ids": real_ids}
+        shared_transactions.append(t)
 
     # ── Fetch group's settlement currency ────────────────────────────────────
     group = db.query(Group).filter_by(id=group_id).first()
