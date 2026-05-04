@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
+import { useAuth } from '../contexts/AuthContext'
 import {
   Users, X, Plus, Check, UserCheck, Wallet, Link2, Copy,
   CheckCircle, MessageCircle, Loader, Hourglass,
@@ -27,6 +28,12 @@ import clsx from 'clsx'
 export default function PeopleSheet({ group, members, isOwner, onClose, onEditHandles }) {
   const groupId = group?.id
   const qc = useQueryClient()
+  const { user } = useAuth()
+  // Has the current signed-in user already claimed a member slot in this trip?
+  // If not, the next "Add someone new" defaults to "this is me" so the trip
+  // owner naturally gets linked when they add themselves first (which they
+  // almost always do, per "Add yourself first, then your friends").
+  const userClaimed = user?.id && members.some((m) => m.user_id === user.id)
 
   // ── Quick-add suggestions ────────────────────────────────────────────────
   // These are people the owner has collaborated with on prior trips. We fetch
@@ -52,11 +59,13 @@ export default function PeopleSheet({ group, members, isOwner, onClose, onEditHa
   })
 
   const addByName = useMutation({
-    mutationFn: (name) => api.addMember(groupId, name),
+    mutationFn: ({ name, claimAsSelf }) =>
+      api.addMember(groupId, name, claimAsSelf && user?.id ? { user_id: user.id } : {}),
     onSuccess: () => {
       setNewName('')
       qc.invalidateQueries(['group', String(groupId)])
       qc.invalidateQueries(['groups'])
+      qc.invalidateQueries(['my-balance', String(groupId)])
     },
   })
 
@@ -65,6 +74,15 @@ export default function PeopleSheet({ group, members, isOwner, onClose, onEditHa
     onSuccess: () => {
       qc.invalidateQueries(['group', String(groupId)])
       qc.invalidateQueries(['groups'])
+    },
+  })
+
+  const claimSlot = useMutation({
+    mutationFn: (id) => api.claimMemberSlot(id),
+    onSuccess: () => {
+      qc.invalidateQueries(['group', String(groupId)])
+      qc.invalidateQueries(['groups'])
+      qc.invalidateQueries(['my-balance', String(groupId)])
     },
   })
 
@@ -86,6 +104,12 @@ export default function PeopleSheet({ group, members, isOwner, onClose, onEditHa
   // ── Local state ──────────────────────────────────────────────────────────
   const [newName, setNewName] = useState('')
 
+  // "This is me" toggle — auto-claims the new member as the current signed-in
+  // user. Defaults true when the user hasn't yet claimed any slot in this
+  // trip (almost always: "the trip owner adds themselves first"). Once
+  // claimed, defaults false so subsequent friends are added as themselves.
+  const [claimAsSelf, setClaimAsSelf] = useState(!userClaimed)
+
   // How many EXTRA people the owner is expecting (above what's already added).
   // We seed this from the existing pending count so the slider lands on the
   // current state, not 0.
@@ -99,7 +123,15 @@ export default function PeopleSheet({ group, members, isOwner, onClose, onEditHa
   function handleAddByName(e) {
     e?.preventDefault()
     if (!newName.trim()) return
-    addByName.mutate(newName.trim())
+    addByName.mutate(
+      { name: newName.trim(), claimAsSelf },
+      {
+        // After claiming once, flip the toggle off so the next add is for a
+        // friend (who isn't the signed-in user). User can re-check if they
+        // accidentally added their friend first.
+        onSuccess: () => { if (claimAsSelf) setClaimAsSelf(false) },
+      }
+    )
   }
 
   function handleQuickAdd(person) {
@@ -206,7 +238,21 @@ export default function PeopleSheet({ group, members, isOwner, onClose, onEditHa
                         </span>
                       </div>
                     </div>
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 sm:transition-opacity">
+                    <div className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:transition-opacity">
+                      {/* "Claim as me" — visible only when this member is
+                          unclaimed AND the signed-in user hasn't already
+                          taken another seat in this trip. Always visible
+                          (not hover-only) so it's discoverable. */}
+                      {!m.user_id && user && !userClaimed && (
+                        <button
+                          onClick={() => claimSlot.mutate(m.id)}
+                          className="text-[11px] font-semibold text-lime-400 hover:text-lime-300 px-2 py-1 rounded border border-lime-400/30 hover:bg-lime-400/10 transition-colors"
+                          title="Link this member to your account"
+                          disabled={claimSlot.isPending}
+                        >
+                          That's me
+                        </button>
+                      )}
                       {onEditHandles && (
                         <button
                           onClick={() => onEditHandles(m)}
@@ -312,24 +358,40 @@ export default function PeopleSheet({ group, members, isOwner, onClose, onEditHa
             <h3 className="text-[11px] font-semibold text-ink-500 uppercase tracking-widest mb-2">
               Add someone new
             </h3>
-            <form onSubmit={handleAddByName} className="flex gap-2">
-              <input
-                type="text"
-                className="input flex-1 text-sm"
-                placeholder="Their name (e.g. Anthony)"
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                autoFocus={realMembers.length === 0}
-              />
-              <button
-                type="submit"
-                className="btn-primary py-2 px-3 text-sm"
-                disabled={!newName.trim() || addByName.isPending}
-              >
-                {addByName.isPending
-                  ? <Loader size={13} className="animate-spin" />
-                  : <><Plus size={13} /> Add</>}
+            <form onSubmit={handleAddByName} className="space-y-2">
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  className="input flex-1 text-sm"
+                  placeholder={!userClaimed ? 'Your name (then add your friends below)' : 'Their name (e.g. Anthony)'}
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  autoFocus={realMembers.length === 0}
+                />
+                <button
+                  type="submit"
+                  className="btn-primary py-2 px-3 text-sm"
+                  disabled={!newName.trim() || addByName.isPending}
+                >
+                  {addByName.isPending
+                    ? <Loader size={13} className="animate-spin" />
+                    : <><Plus size={13} /> Add</>}
               </button>
+              </div>
+              {/* "This is me" — only meaningful while the user hasn't claimed
+                  any slot in this trip. Defaulted on; if Elle is adding a
+                  friend first, she just unchecks. */}
+              {user && !userClaimed && (
+                <label className="flex items-center gap-2 text-xs text-ink-400 cursor-pointer select-none ml-1">
+                  <input
+                    type="checkbox"
+                    className="accent-lime-400 cursor-pointer"
+                    checked={claimAsSelf}
+                    onChange={(e) => setClaimAsSelf(e.target.checked)}
+                  />
+                  This is me — link this name to my account
+                </label>
+              )}
             </form>
           </section>
 

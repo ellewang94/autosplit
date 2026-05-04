@@ -86,6 +86,12 @@ export const api = {
   // user's net position (positive = owed, negative = you owe) plus paid/share
   // breakdown. Returns linked:false if user hasn't claimed a member slot yet.
   getMyBalance: (groupId) => request(`/groups/${groupId}/my-balance`),
+
+  // Link the current signed-in user to an existing unclaimed member row.
+  // Used by the People sheet's "Claim as me" button.
+  claimMemberSlot: (memberId) => request(`/members/${memberId}/claim`, {
+    method: 'PUT',
+  }),
   updateMember: (id, name) => request(`/members/${id}`, {
     method: 'PUT', body: JSON.stringify({ name }),
   }),

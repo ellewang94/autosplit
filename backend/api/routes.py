@@ -275,6 +275,57 @@ def delete_member(
     return {"ok": True}
 
 
+@router.put("/members/{member_id}/claim", response_model=MemberResponse)
+def claim_member_slot(
+    member_id: int,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """
+    Link the current signed-in user to an existing unclaimed member row.
+
+    Used by the People sheet's "Claim as me" button — handles the case where
+    the trip owner added themselves by name but didn't tick "This is me".
+    Without claiming, the per-user balance widget can't compute their share.
+
+    Safety rules:
+    - The member must currently be unclaimed (user_id is null) OR already
+      claimed by the same user_id (idempotent).
+    - The user can only claim ONE slot per group. If they're already linked
+      to a different member here, refuse — otherwise we'd silently steal
+      their friend's seat.
+    """
+    member = db.query(Member).filter_by(id=member_id).first()
+    if not member:
+        raise HTTPException(status_code=404, detail="Member not found")
+
+    # Already claimed by someone else — block.
+    if member.user_id and member.user_id != user_id:
+        raise HTTPException(status_code=400, detail="That seat already belongs to someone else.")
+
+    # User already linked to a different seat in this group — block to avoid
+    # losing the existing link.
+    other = (
+        db.query(Member)
+        .filter(Member.group_id == member.group_id)
+        .filter(Member.user_id == user_id)
+        .filter(Member.id != member_id)
+        .first()
+    )
+    if other:
+        raise HTTPException(
+            status_code=400,
+            detail=f"You're already on this trip as '{other.name}'. Edit or remove that first.",
+        )
+
+    member.user_id = user_id
+    if member.is_placeholder:
+        member.is_placeholder = False
+    db.commit()
+    db.refresh(member)
+    return member
+
+
 @router.put("/members/{member_id}/payment-handles", response_model=MemberResponse)
 def update_payment_handles(
     member_id: int,
