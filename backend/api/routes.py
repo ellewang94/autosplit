@@ -208,12 +208,19 @@ def add_member(
 
     # If we're adding a real person and there's a placeholder slot waiting,
     # fill that slot instead of creating a fresh row. Predictable member count.
-    placeholder = (
-        db.query(Member)
-        .filter_by(group_id=group_id, is_placeholder=True)
-        .order_by(Member.id.asc())
-        .first()
-    )
+    # Wrapped in try/except so a missing or wrong-type is_placeholder column
+    # (e.g. mid-migration) degrades to "always create a fresh row" instead
+    # of 500ing the entire add-member flow.
+    placeholder = None
+    try:
+        placeholder = (
+            db.query(Member)
+            .filter_by(group_id=group_id, is_placeholder=True)
+            .order_by(Member.id.asc())
+            .first()
+        )
+    except Exception:
+        db.rollback()
     if placeholder:
         placeholder.name = body.name
         placeholder.is_placeholder = False
@@ -1341,15 +1348,23 @@ def list_recent_collaborators(
     if not trip_ids:
         return []
 
-    # All members across those trips, joined to their Group for trip-name display
-    rows = (
-        db.query(Member, Group)
-        .join(Group, Member.group_id == Group.id)
-        .filter(Member.group_id.in_(trip_ids))
-        .filter(Member.is_placeholder.is_(False) if hasattr(Member, "is_placeholder") else True)
-        .order_by(Group.created_at.desc())
-        .all()
-    )
+    # All members across those trips, joined to their Group for trip-name display.
+    # We filter placeholder rows in Python rather than SQL because depending on
+    # the column's actual DB type (BOOLEAN vs INTEGER, mid-migration), a SQL-side
+    # filter can blow up the whole query. Filtering in Python is forgiving.
+    try:
+        rows = (
+            db.query(Member, Group)
+            .join(Group, Member.group_id == Group.id)
+            .filter(Member.group_id.in_(trip_ids))
+            .order_by(Group.created_at.desc())
+            .all()
+        )
+    except Exception:
+        # If even the base query fails (rare — implies a deeper schema issue),
+        # return an empty list so the People sheet just hides the chips section.
+        db.rollback()
+        return []
 
     # Aggregate: key by user_id when present, else by lowercased name
     bucket: dict[str, dict] = {}
@@ -1357,8 +1372,9 @@ def list_recent_collaborators(
         # Skip self
         if member.user_id and member.user_id == user_id:
             continue
-        # Skip the empty placeholder rows defensively
-        if member.is_placeholder or not (member.name or "").strip():
+        # Skip empty placeholder rows. getattr fallback shields us from
+        # ORM hydration errors if the column is missing entirely.
+        if getattr(member, "is_placeholder", False) or not (member.name or "").strip():
             continue
         key = ("u:" + member.user_id) if member.user_id else ("n:" + member.name.strip().lower())
         entry = bucket.get(key)
