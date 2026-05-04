@@ -159,7 +159,10 @@ function HeaderCheckbox({ selectedCount, totalCount, onToggleAll }) {
 // ── Bulk participants popover ─────────────────────────────────────────────────
 // A small dropdown that lets you choose who to assign to the selected transactions.
 
-function ParticipantsPopover({ members, onApply, onClose }) {
+function ParticipantsPopover({ members: allMembers, onApply, onClose }) {
+  // Skip placeholder ("(Pending)") members — they shouldn't be selectable
+  // as participants until a real friend claims the slot via invite link.
+  const members = allMembers.filter((m) => !m.is_placeholder)
   const [selected, setSelected] = useState([])
 
   const toggle = (id) => setSelected(prev =>
@@ -314,7 +317,9 @@ function InlineParticipantsEdit({ txn, members, groupId, onClose }) {
 // amount directly. This is the right UX: if someone misread "¥5,000" as "¥50,000"
 // we just fix the number, we don't re-run exchange rate math.
 
-function EditTransactionModal({ transaction, members, baseCurrency, onClose }) {
+function EditTransactionModal({ transaction, members: allMembers, baseCurrency, onClose }) {
+  // Same rule as AddExpenseModal — placeholders don't get charged.
+  const members = allMembers.filter((m) => !m.is_placeholder)
   const qc = useQueryClient()
 
   // Pre-fill the form with the existing transaction values
@@ -681,8 +686,14 @@ function EditTransactionModal({ transaction, members, baseCurrency, onClose }) {
   )
 }
 
-function AddExpenseModal({ groupId, members, group, onClose, onSaved, autoSnap = false }) {
+function AddExpenseModal({ groupId, members: allMembers, group, onClose, onSaved, autoSnap = false }) {
   const qc = useQueryClient()
+
+  // Strip placeholder ("(Pending)") rows from the participant + payer lists.
+  // Placeholders are visual-only seats waiting for friends to claim them via
+  // the invite link; they shouldn't be charged for an expense or marked as
+  // having paid for one. Real members only inside this modal.
+  const members = allMembers.filter((m) => !m.is_placeholder)
 
   // The group's settlement currency — all foreign amounts convert to this
   const baseCurrency = group?.base_currency || 'USD'
@@ -696,7 +707,7 @@ function AddExpenseModal({ groupId, members, group, onClose, onSaved, autoSnap =
   const [currency, setCurrency] = useState(baseCurrency)     // starts at group's base currency
   const [exchangeRate, setExchangeRate] = useState('')       // shown only when currency differs
   const [paidBy, setPaidBy] = useState(members[0]?.id ?? '')
-  // By default everyone splits — all member IDs checked
+  // By default everyone splits — all REAL member IDs checked
   const [participantIds, setParticipantIds] = useState(members.map(m => m.id))
   const [category, setCategory] = useState('')   // empty = auto-detect on backend
   const [error, setError] = useState('')
