@@ -403,7 +403,11 @@ function SharePanel({ groupId, effectivePayerId }) {
     setLoading(true)
     try {
       const result = await api.createShare(groupId, effectivePayerId)
-      setShareUrl(result.share_url)
+      // Build the share URL from the current browser origin rather than
+      // trusting result.share_url. The backend builds it from FRONTEND_URL
+      // which can drift to a Vercel preview domain — same fix as the
+      // PeopleSheet invite link. The share_code is canonical.
+      setShareUrl(`${window.location.origin}/share/${result.share_code}`)
       // Track the share creation — this is the key viral moment
       trackShareCreated(groupId)
     } catch (e) {

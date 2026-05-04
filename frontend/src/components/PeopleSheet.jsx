@@ -71,7 +71,13 @@ export default function PeopleSheet({ group, members, isOwner, onClose, onEditHa
   const reserveSlots = useMutation({
     mutationFn: (count) => api.createInviteSlots(groupId, count),
     onSuccess: (data) => {
-      setInviteUrl(data.invite_url)
+      // Always rebuild the invite URL from the current browser origin rather
+      // than trusting the backend's invite_url. The backend builds it from
+      // FRONTEND_URL env or request.base_url, both of which can drift to a
+      // Vercel preview domain (e.g. frontend-nine-lac-33.vercel.app) instead
+      // of autosplit.co. The invite_code is canonical; we own the host.
+      const url = `${window.location.origin}/join/${data.invite_code}`
+      setInviteUrl(url)
       qc.invalidateQueries(['group', String(groupId)])
       qc.invalidateQueries(['groups'])
     },
@@ -107,8 +113,10 @@ export default function PeopleSheet({ group, members, isOwner, onClose, onEditHa
   async function handleReserveAndShare() {
     // Reserve the slots, then surface the link. Reserving is idempotent so
     // the user can adjust the count and re-call without piling up extras.
+    // We rebuild the URL from window.location.origin (see mutation onSuccess
+    // for the rationale) — this overwrite is just defensive.
     const data = await reserveSlots.mutateAsync(expectedCount)
-    setInviteUrl(data.invite_url)
+    setInviteUrl(`${window.location.origin}/join/${data.invite_code}`)
   }
 
   function handleCopy() {
