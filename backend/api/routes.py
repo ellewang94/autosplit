@@ -1272,8 +1272,13 @@ def get_public_share(
     if not group:
         raise HTTPException(status_code=404, detail="Trip not found.")
 
-    # Fetch members (names only — no private user data)
-    members = db.query(Member).filter_by(group_id=share.group_id).all()
+    # Fetch members (names only — no private user data).
+    # Skip placeholder seats: they're an internal "we're expecting N more"
+    # thing the trip owner sees, not something to surface to a public viewer.
+    members = [
+        m for m in db.query(Member).filter_by(group_id=share.group_id).all()
+        if not getattr(m, "is_placeholder", False)
+    ]
     member_lookup = {m.id: m.name for m in members}
 
     # Determine the payer for this settlement computation
