@@ -603,17 +603,26 @@ export default function SettlementPage() {
   // How many real statements are missing a card holder?
   const unassignedCount = realStatements.filter(s => !s.card_holder_member_id).length
 
+  // Manual-only trip: zero uploaded statements, all expenses entered manually
+  // (which means each transaction already knows its payer via paid_by_member_id).
+  // Settlement doesn't need a fallback in this case.
+  const manualOnly = realStatements.length === 0 && allTransactions.length > 0
+
   // ── Effective payer for backend ────────────────────────────────────────────
-  // If every statement has a card holder set, the backend's `payer_member_id` param
-  // is never actually used (all transactions are covered by statement_payers).
-  // We still have to send *something* — just auto-pick the first member.
-  const effectivePayerId = allAssigned
+  // If every statement has a card holder set OR we're manual-only, the backend's
+  // `payer_member_id` param is never actually used. We still have to send
+  // *something* — auto-pick the first member.
+  const effectivePayerId = (allAssigned || manualOnly)
     ? (members[0]?.id ?? '')
     : parseInt(fallbackPayerId)
 
   // Can we compute settlement?
-  // Yes if: there are members AND (all statements assigned OR user picked a fallback)
-  const canCompute = members.length > 0 && (allAssigned || !!fallbackPayerId)
+  // Yes if: there are members AND there's something to settle AND
+  //         (all statements assigned OR manual-only OR user picked a fallback)
+  const canCompute =
+    members.length > 0 &&
+    allTransactions.length > 0 &&
+    (allAssigned || manualOnly || !!fallbackPayerId)
 
   const compute = useMutation({
     mutationFn: () => api.computeSettlement(
@@ -660,14 +669,25 @@ export default function SettlementPage() {
         </h2>
 
         {realStatements.length === 0 ? (
-          // No real statements uploaded yet
+          // No uploaded statements yet — but they might still have manual entries.
+          // The copy adapts to make settlement-readiness clear instead of
+          // demanding a statement upload that isn't required for manual-only trips.
           <div className="text-center py-6">
-            <p className="text-sm text-ink-400 mb-3">No statements imported yet</p>
+            {allTransactions.length > 0 ? (
+              <>
+                <p className="text-sm text-ink-300 mb-1">All entries are manual — that works too.</p>
+                <p className="text-xs text-ink-500 mb-3">
+                  Each manual expense knows who paid, so no card-holder setup needed.
+                </p>
+              </>
+            ) : (
+              <p className="text-sm text-ink-400 mb-3">No expenses yet</p>
+            )}
             <button
               className="btn-secondary text-xs"
               onClick={() => navigate(`/groups/${groupId}/upload`)}
             >
-              Import Statement
+              {allTransactions.length > 0 ? 'Add another' : 'Add expenses'}
             </button>
           </div>
         ) : (
@@ -914,11 +934,13 @@ export default function SettlementPage() {
           <TrendingUp size={36} className="text-ink-600 mx-auto mb-3" />
           <p className="font-display text-xl text-ink-300 mb-2">Ready to settle up</p>
           <p className="text-sm text-ink-500">
-            {realStatements.length === 0
-              ? 'Import at least one statement to get started'
-              : allAssigned
-                ? 'All cards are set up — click Compute Settlement above'
-                : 'Choose a fallback payer and click Compute Settlement'
+            {allTransactions.length === 0
+              ? 'Add an expense first — upload a statement, snap a receipt, or type one in'
+              : manualOnly
+                ? 'All set — click Compute Settlement above'
+                : allAssigned
+                  ? 'All cards are set up — click Compute Settlement above'
+                  : 'Choose a fallback payer and click Compute Settlement'
             }
           </p>
         </div>
