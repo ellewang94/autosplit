@@ -36,6 +36,13 @@ class Group(Base):
     # Invite link token — anyone with this URL can join as a collaborator.
     # Generated on demand, revocable by regenerating. Separate from share_code.
     invite_code = Column(String, nullable=True, unique=True, index=True)
+    # Group "shape" — controls how the UI is framed and which features apply.
+    #   "trip"      = has dates, settles once at the end (default for back-compat)
+    #   "household" = ongoing (rent/utilities/groceries with a roommate or partner),
+    #                 hides date pickers, settles via the running balance, supports
+    #                 recurring expenses
+    # Add new kinds here as we add use cases (e.g. "office" for work meals).
+    kind = Column(String, nullable=False, default="trip", server_default="trip")
 
     # One group → many members/statements/rules
     members = relationship("Member", back_populates="group", cascade="all, delete-orphan")

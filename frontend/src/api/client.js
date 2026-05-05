@@ -49,10 +49,11 @@ async function request(path, options = {}) {
 export const api = {
   // Groups
   getGroups: () => request('/groups'),
-  // createGroup accepts optional trip dates and an optional base_currency (e.g. "USD", "JPY")
-  // base_currency is the currency that all expenses get settled in for this group
-  createGroup: (name, start_date = null, end_date = null, base_currency = 'USD') =>
-    request('/groups', { method: 'POST', body: JSON.stringify({ name, start_date, end_date, base_currency }) }),
+  // createGroup accepts optional trip dates, base_currency, and group kind.
+  // kind: 'trip' (default — has dates, settles at end) or 'household'
+  // (ongoing roommate / couple ledger — no dates, recurring expenses, running balance).
+  createGroup: (name, start_date = null, end_date = null, base_currency = 'USD', kind = 'trip') =>
+    request('/groups', { method: 'POST', body: JSON.stringify({ name, start_date, end_date, base_currency, kind }) }),
   updateGroup: (id, name, start_date = null, end_date = null) =>
     request(`/groups/${id}`, { method: 'PUT', body: JSON.stringify({ name, start_date, end_date }) }),
   deleteGroup: (id) => request(`/groups/${id}`, { method: 'DELETE' }),

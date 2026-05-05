@@ -108,6 +108,10 @@ def run_migrations():
             # has no real BOOLEAN type but coerces 0/1 to bool implicitly.
             ("members", "is_placeholder",
                 "BOOLEAN NOT NULL DEFAULT FALSE" if _IS_POSTGRES else "INTEGER NOT NULL DEFAULT 0"),
+            # Groups table — "shape" selector. 'trip' (default) keeps existing
+            # behaviour: dates, end-of-trip settle. 'household' hides dates and
+            # supports recurring expenses for ongoing roommate / couple ledgers.
+            ("groups", "kind", "VARCHAR NOT NULL DEFAULT 'trip'"),
         ]
 
         for table, column, definition in new_columns:

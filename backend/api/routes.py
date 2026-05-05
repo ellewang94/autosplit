@@ -129,13 +129,20 @@ def create_group(
     user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    """Create a new trip — automatically assigned to the signed-in user."""
+    """Create a new trip or household — automatically assigned to the signed-in user."""
+    # Validate kind defensively. Unknown values fall back to 'trip' so a future
+    # frontend bug never blocks group creation.
+    kind = body.kind if body.kind in ("trip", "household") else "trip"
+    # Households are ongoing, so dates are nonsensical — strip them defensively.
+    start_date = None if kind == "household" else body.start_date
+    end_date = None if kind == "household" else body.end_date
     group = Group(
         name=body.name,
-        start_date=body.start_date,
-        end_date=body.end_date,
+        start_date=start_date,
+        end_date=end_date,
         base_currency=body.base_currency,
-        owner_id=user_id,   # Tag this trip to the user who created it
+        owner_id=user_id,
+        kind=kind,
     )
     db.add(group)
     db.commit()

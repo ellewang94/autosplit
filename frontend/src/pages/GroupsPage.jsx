@@ -6,7 +6,7 @@ import { trackTripCreated } from '../lib/analytics'
 import OnboardingModal from '../components/OnboardingModal'
 import {
   Users, Plus, Trash2, UserPlus,
-  ChevronRight, X, Check, Calendar,
+  ChevronRight, X, Check, Calendar, Plane, Home,
 } from 'lucide-react'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -257,37 +257,92 @@ function CreateGroupForm({ onDone }) {
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [baseCurrency, setBaseCurrency] = useState('USD')  // default to USD
+  // 'trip' = vacation/event with end date · 'household' = ongoing roommate / couple ledger
+  const [kind, setKind] = useState('trip')
   const qc = useQueryClient()
   const navigate = useNavigate()
 
   const create = useMutation({
     mutationFn: () => api.createGroup(
       name.trim(),
-      startDate || null,   // pass null if empty (backend accepts null for "no date range")
-      endDate || null,
-      baseCurrency,        // settlement currency for this trip
+      kind === 'household' ? null : (startDate || null),
+      kind === 'household' ? null : (endDate || null),
+      baseCurrency,
+      kind,
     ),
     onSuccess: (data) => {
       qc.invalidateQueries(['groups'])
-      // Track the new trip event — tells us how many trips active users create
       trackTripCreated()
-      // Go straight into the new trip so the user can add members immediately.
-      // Pass newTrip=true so TripOverviewPage auto-opens the add-member form.
       navigate(`/groups/${data.id}`, { state: { newTrip: true } })
     },
   })
+
+  const isHousehold = kind === 'household'
 
   return (
     <form
       onSubmit={(e) => { e.preventDefault(); if (name.trim()) create.mutate() }}
       className="card border-lime-400/30 animate-slide-up"
     >
-      <h3 className="font-display text-lg font-semibold text-ink-50 mb-3">New Trip</h3>
+      <h3 className="font-display text-lg font-semibold text-ink-50 mb-3">
+        {isHousehold ? 'New Household' : 'New Trip'}
+      </h3>
 
-      {/* Trip name */}
+      {/* ── Kind toggle: Trip vs Household ─────────────────────────────────
+          Two distinct mental models. Trip = vacation, ends, settles once.
+          Household = roommate / partner ledger that runs forever, gets
+          settled monthly. UI elements adapt below based on this choice. */}
+      <div className="grid grid-cols-2 gap-2 mb-4">
+        <button
+          type="button"
+          onClick={() => setKind('trip')}
+          className={clsx(
+            'flex items-center gap-2 px-3 py-2.5 rounded-lg border-2 transition-all text-left',
+            kind === 'trip'
+              ? 'border-lime-400/50 bg-lime-400/8'
+              : 'border-ink-700 hover:border-ink-500 bg-ink-800/30',
+          )}
+        >
+          <div className={clsx(
+            'w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0',
+            kind === 'trip' ? 'bg-lime-400/15' : 'bg-ink-800',
+          )}>
+            <Plane size={14} className={kind === 'trip' ? 'text-lime-400' : 'text-ink-400'} />
+          </div>
+          <div className="min-w-0">
+            <div className="text-sm font-semibold text-ink-100">Trip</div>
+            <div className="text-[10px] text-ink-500 leading-tight">Has dates · settle at the end</div>
+          </div>
+        </button>
+        <button
+          type="button"
+          onClick={() => setKind('household')}
+          className={clsx(
+            'flex items-center gap-2 px-3 py-2.5 rounded-lg border-2 transition-all text-left',
+            kind === 'household'
+              ? 'border-lime-400/50 bg-lime-400/8'
+              : 'border-ink-700 hover:border-ink-500 bg-ink-800/30',
+          )}
+        >
+          <div className={clsx(
+            'w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0',
+            kind === 'household' ? 'bg-lime-400/15' : 'bg-ink-800',
+          )}>
+            <Home size={14} className={kind === 'household' ? 'text-lime-400' : 'text-ink-400'} />
+          </div>
+          <div className="min-w-0">
+            <div className="text-sm font-semibold text-ink-100">Household</div>
+            <div className="text-[10px] text-ink-500 leading-tight">Ongoing · rent &amp; bills monthly</div>
+          </div>
+        </button>
+      </div>
+
+      {/* Group name (placeholder adapts to kind) */}
       <input
         className="input mb-3"
-        placeholder="e.g. Japan 2026, Ski Trip, The Apartment…"
+        placeholder={isHousehold
+          ? 'e.g. Apartment, Our place, The Loft…'
+          : 'e.g. Japan 2026, Ski Trip, Mexico…'}
         value={name}
         onChange={(e) => setName(e.target.value)}
         autoFocus
@@ -312,56 +367,64 @@ function CreateGroupForm({ onDone }) {
         </select>
       </div>
 
-      {/* Optional trip date range.
-          Mobile: stack vertically with explicit "Start" / "End" labels — the
-          previous side-by-side layout overflowed the card because iOS Safari
-          renders date inputs at the 16px-floor we enforce globally to stop
-          focus-zoom. Above sm we go back to side-by-side with a dash. */}
-      <div className="mb-4">
-        <label className="block text-xs text-ink-400 mb-1.5 flex items-center gap-1.5">
-          <Calendar size={11} />
-          Trip dates <span className="text-ink-600">(optional)</span>
-        </label>
-        <p className="text-xs text-ink-500 mb-3">
-          Everyday spending outside these dates is <strong className="text-amber-400/90">auto-excluded</strong>. Flights, hotels, and Airbnbs booked up to 90 days before are <strong className="text-lime-400/90">flagged for review</strong> — so pre-trip bookings don't disappear.
-        </p>
+      {/* Trip dates — hidden entirely in household mode (a household has no
+          end date by definition). Stacked layout on mobile to dodge the
+          iOS Safari 16px input width overflow. */}
+      {!isHousehold && (
+        <div className="mb-4">
+          <label className="block text-xs text-ink-400 mb-1.5 flex items-center gap-1.5">
+            <Calendar size={11} />
+            Trip dates <span className="text-ink-600">(optional)</span>
+          </label>
+          <p className="text-xs text-ink-500 mb-3">
+            Everyday spending outside these dates is <strong className="text-amber-400/90">auto-excluded</strong>. Flights, hotels, and Airbnbs booked up to 90 days before are <strong className="text-lime-400/90">flagged for review</strong> — so pre-trip bookings don't disappear.
+          </p>
 
-        {/* Mobile-first: stacked. sm+ : inline two-up with a dash. */}
-        <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-          <div className="flex-1 min-w-0">
-            <span className="block text-[10px] text-ink-500 uppercase tracking-widest mb-1 sm:hidden">
-              Start
-            </span>
-            <input
-              type="date"
-              className="input w-full text-sm [color-scheme:dark]"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-              max={endDate || undefined}
-              aria-label="Trip start date"
-            />
-          </div>
-          <span className="hidden sm:inline text-ink-500 text-sm shrink-0">–</span>
-          <div className="flex-1 min-w-0">
-            <span className="block text-[10px] text-ink-500 uppercase tracking-widest mb-1 sm:hidden">
-              End
-            </span>
-            <input
-              type="date"
-              className="input w-full text-sm [color-scheme:dark]"
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-              min={startDate || undefined}
-              aria-label="Trip end date"
-            />
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+            <div className="flex-1 min-w-0">
+              <span className="block text-[10px] text-ink-500 uppercase tracking-widest mb-1 sm:hidden">
+                Start
+              </span>
+              <input
+                type="date"
+                className="input w-full text-sm [color-scheme:dark]"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                max={endDate || undefined}
+                aria-label="Trip start date"
+              />
+            </div>
+            <span className="hidden sm:inline text-ink-500 text-sm shrink-0">–</span>
+            <div className="flex-1 min-w-0">
+              <span className="block text-[10px] text-ink-500 uppercase tracking-widest mb-1 sm:hidden">
+                End
+              </span>
+              <input
+                type="date"
+                className="input w-full text-sm [color-scheme:dark]"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                min={startDate || undefined}
+                aria-label="Trip end date"
+              />
+            </div>
           </div>
         </div>
-      </div>
+      )}
+
+      {/* Tiny helper note shown in Household mode to set expectations */}
+      {isHousehold && (
+        <p className="text-[11px] text-ink-500 mb-4 leading-relaxed">
+          Households are ongoing — no end date. Add expenses as they happen, settle up monthly (or whenever you both agree).
+        </p>
+      )}
 
       <div className="flex gap-2">
         <button type="submit" className="btn-primary" disabled={!name.trim() || create.isPending}>
           <Plus size={14} />
-          {create.isPending ? 'Creating…' : 'Create Trip'}
+          {create.isPending
+            ? 'Creating…'
+            : isHousehold ? 'Create Household' : 'Create Trip'}
         </button>
         <button type="button" className="btn-ghost" onClick={onDone}>Cancel</button>
       </div>

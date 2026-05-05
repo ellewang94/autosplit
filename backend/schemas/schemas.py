@@ -78,6 +78,10 @@ class GroupCreate(BaseModel):
     end_date: Optional[str] = None    # ISO date e.g. "2026-01-19"
     # The settlement currency for this group — all foreign expenses get converted to this
     base_currency: str = "USD"
+    # 'trip' (default) or 'household'. Controls UI framing and which features
+    # apply (dates, recurring expenses, settle-period). Defaults to 'trip' so
+    # existing call sites keep working.
+    kind: str = "trip"
 
 class GroupResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -90,6 +94,7 @@ class GroupResponse(BaseModel):
     # Return the group's settlement currency to the frontend
     base_currency: str = "USD"
     owner_id: Optional[str] = None   # Supabase UUID of the trip creator
+    kind: str = "trip"
 
 
 # ─── Statements ───────────────────────────────────────────────────────────────
