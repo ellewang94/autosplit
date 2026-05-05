@@ -100,6 +100,20 @@ export const api = {
   setTransactionItems: (txnId, items) => request(`/transactions/${txnId}/items`, {
     method: 'PUT', body: JSON.stringify({ items }),
   }),
+
+  // ── Recurring expenses (households / monthly bills) ───────────────────────
+  // Templates that auto-generate transactions monthly. The list call also
+  // implicitly catches up missing past instances on the backend (lazy cron).
+  listRecurring: (groupId) => request(`/groups/${groupId}/recurring`),
+  createRecurring: (groupId, body) => request(`/groups/${groupId}/recurring`, {
+    method: 'POST', body: JSON.stringify(body),
+  }),
+  toggleRecurring: (recurringId) => request(`/recurring/${recurringId}/toggle`, {
+    method: 'PUT',
+  }),
+  deleteRecurring: (recurringId) => request(`/recurring/${recurringId}`, {
+    method: 'DELETE',
+  }),
   updateMember: (id, name) => request(`/members/${id}`, {
     method: 'PUT', body: JSON.stringify({ name }),
   }),

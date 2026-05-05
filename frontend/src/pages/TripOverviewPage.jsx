@@ -11,6 +11,7 @@ import clsx from 'clsx'
 import { useAuth } from '../contexts/AuthContext'
 import PeopleSheet from '../components/PeopleSheet'
 import { PaymentHandlesEditor } from '../components/PaymentHandles'
+import RecurringExpenses from '../components/RecurringExpenses'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -454,6 +455,20 @@ export default function TripOverviewPage() {
           transactions and the current user is linked to a member slot
           (otherwise the math is meaningless). */}
       {hasTransactions && <MyBalanceWidget groupId={groupId} />}
+
+      {/* ── Recurring expenses ───────────────────────────────────────────────
+          Killer feature for households (rent, utilities, subscriptions).
+          Shown prominently on household groups. Hidden by default on trips
+          since they rarely use it — show it only when a member adds at least
+          one (then they keep seeing the section). For now: always show on
+          households, hide on trips. */}
+      {group?.kind === 'household' && (
+        <RecurringExpenses
+          groupId={groupId}
+          members={members}
+          baseCurrency={group?.base_currency || 'USD'}
+        />
+      )}
 
       {/* ── Joined-member guidance banner ─────────────────────────────────── */}
       {/* Only shown to members who joined via invite link and haven't uploaded yet.
