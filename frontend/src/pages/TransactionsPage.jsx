@@ -2,10 +2,11 @@ import { useState, useMemo, useEffect, useRef } from 'react'
 import { useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
+import ItemizeSheet from '../components/ItemizeSheet'
 import {
   List, TrendingUp, AlertTriangle, Users, Check, X,
   ChevronDown, Search, CheckSquare, Square, Minus, Calendar, Plane, Download, Plus, Trash2, Pencil,
-  Camera, Sparkles, Loader,
+  Camera, Sparkles, Loader, Layers,
 } from 'lucide-react'
 import clsx from 'clsx'
 
@@ -1404,6 +1405,8 @@ export default function TransactionsPage() {
 
   // ID of the transaction currently open in the Edit modal (null = modal closed)
   const [editTxnId, setEditTxnId] = useState(null)
+  // ID of the transaction currently being itemized (split into per-item pieces)
+  const [itemizeTxnId, setItemizeTxnId] = useState(null)
 
   const { data: group } = useQuery({
     queryKey: ['group', groupId],
@@ -2230,6 +2233,22 @@ export default function TransactionsPage() {
                                   <X size={13} />
                                 </button>
                               )}
+                              {/* Itemize — break this transaction into per-item splits.
+                                  Lit if items already exist (visual indicator). */}
+                              <button
+                                className={clsx(
+                                  'p-1 rounded transition-colors',
+                                  txn.items_json && txn.items_json.length > 0
+                                    ? 'text-lime-400 hover:bg-lime-400/15'
+                                    : 'text-ink-500 hover:text-lime-400 hover:bg-lime-400/10',
+                                )}
+                                title={txn.items_json && txn.items_json.length > 0
+                                  ? `Edit the ${txn.items_json.length} items on this charge`
+                                  : 'Split into items (some mine, some yours, some shared)'}
+                                onClick={() => setItemizeTxnId(txn.id)}
+                              >
+                                <Layers size={12} />
+                              </button>
                               {/* Edit button — opens the edit modal to fix any field */}
                               <button
                                 className="p-1 rounded text-ink-500 hover:text-lime-400 hover:bg-lime-400/10 transition-colors"
@@ -2270,6 +2289,23 @@ export default function TransactionsPage() {
             members={members}
             baseCurrency={group?.base_currency || 'USD'}
             onClose={() => setEditTxnId(null)}
+          />
+        )
+      })()}
+
+      {/* Itemize sheet — break one transaction into per-item splits.
+          Pass only REAL members (placeholders excluded — they shouldn't be
+          listed as participants on individual items either). */}
+      {itemizeTxnId && (() => {
+        const txn = transactions.find(t => t.id === itemizeTxnId)
+        if (!txn) return null
+        const realMembers = members.filter(m => !m.is_placeholder)
+        return (
+          <ItemizeSheet
+            transaction={txn}
+            members={realMembers}
+            currency={group?.base_currency || 'USD'}
+            onClose={() => setItemizeTxnId(null)}
           />
         )
       })()}

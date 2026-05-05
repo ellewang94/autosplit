@@ -93,6 +93,13 @@ export const api = {
   claimMemberSlot: (memberId) => request(`/members/${memberId}/claim`, {
     method: 'PUT',
   }),
+
+  // Break a transaction into per-item splits (mixed receipts/statements).
+  // items: [{name, amount, member_ids}]. Sum must equal txn amount.
+  // Pass an empty array to clear itemization (revert to whole-txn split).
+  setTransactionItems: (txnId, items) => request(`/transactions/${txnId}/items`, {
+    method: 'PUT', body: JSON.stringify({ items }),
+  }),
   updateMember: (id, name) => request(`/members/${id}`, {
     method: 'PUT', body: JSON.stringify({ name }),
   }),
