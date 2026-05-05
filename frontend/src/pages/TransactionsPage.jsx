@@ -722,6 +722,10 @@ function AddExpenseModal({ groupId, members: allMembers, group, onClose, onSaved
   const [ocrLoading, setOcrLoading] = useState(false)
   const [ocrResult, setOcrResult] = useState(null) // { confidence, notes } from last successful parse
   const [ocrError, setOcrError] = useState('')
+  // Line items extracted by Claude (if the receipt had multiple lines).
+  // Used after save to auto-open the ItemizeSheet pre-filled — a one-tap
+  // "mine / yours / shared" pass instead of typing items by hand.
+  const [ocrItems, setOcrItems] = useState([])
 
   // If the modal was opened via the "Snap a receipt" path on the Add Expenses
   // picker, fire the camera input on mount so the user lands directly on the
@@ -764,6 +768,17 @@ function AddExpenseModal({ groupId, members: allMembers, group, onClose, onSaved
         const mapped = map[data.category] || data.category
         if (CATEGORIES.includes(mapped)) setCategory(mapped)
       }
+      // Capture items[] separately — used post-save to auto-open the
+      // ItemizeSheet pre-filled with line items so the user can tap
+      // "mine / yours / shared" on each one. Default each item to all
+      // members (= "shared") so the most common case is just "save".
+      setOcrItems(
+        (data.items || []).map((it) => ({
+          name: it.name || '',
+          amount: typeof it.amount === 'number' ? it.amount : parseFloat(it.amount) || 0,
+          member_ids: members.map((m) => m.id),
+        })).filter((it) => it.amount > 0)
+      )
       setOcrResult({ confidence: data.confidence, notes: data.notes })
     } catch (err) {
       setOcrError(err.message || 'Could not read this receipt.')
@@ -856,10 +871,14 @@ function AddExpenseModal({ groupId, members: allMembers, group, onClose, onSaved
       currency,
       exchangeRate: currency !== baseCurrency && exchangeRate ? parseFloat(exchangeRate) : null,
     }),
-    onSuccess: () => {
+    onSuccess: (data) => {
       // Refresh the transactions list so the new expense appears immediately
       qc.invalidateQueries(['group-transactions', groupId])
-      onSaved?.()
+      // Hand the saved transaction + any OCR-extracted line items back to
+      // the parent so it can auto-open the ItemizeSheet for one-tap
+      // "mine / yours / shared" assignment. Skip if there's only 1 item
+      // (no point splitting one item).
+      onSaved?.(data, ocrItems.length >= 2 ? ocrItems : null)
       onClose()
     },
     onError: (err) => setError(err.message),
@@ -1407,6 +1426,11 @@ export default function TransactionsPage() {
   const [editTxnId, setEditTxnId] = useState(null)
   // ID of the transaction currently being itemized (split into per-item pieces)
   const [itemizeTxnId, setItemizeTxnId] = useState(null)
+  // OCR-extracted line items waiting to seed the next ItemizeSheet open.
+  // Set when AddExpenseModal saves with a multi-item receipt; cleared when
+  // ItemizeSheet closes. Lets the AI-extracted items pre-populate the rows
+  // so the user only has to tap mine/yours/shared.
+  const [pendingOcrItems, setPendingOcrItems] = useState(null)
 
   const { data: group } = useQuery({
     queryKey: ['group', groupId],
@@ -2295,8 +2319,16 @@ export default function TransactionsPage() {
 
       {/* Itemize sheet — break one transaction into per-item splits.
           Pass only REAL members (placeholders excluded — they shouldn't be
-          listed as participants on individual items either). */}
+          listed as participants on individual items either).
+          initialItems is set when we open via a fresh receipt OCR — the
+          AI's extracted line items pre-populate the rows so the user
+          just taps "mine / yours / shared" instead of typing. */}
       {itemizeTxnId && (() => {
+        // We may be opening the sheet right after a receipt OCR — in that
+        // case the parent passed initialItems via state set by AddExpenseModal's
+        // onSaved callback. Otherwise (user clicked Layers on a row), no
+        // initial items and the sheet starts blank or pre-filled from the
+        // existing items_json on the transaction.
         const txn = transactions.find(t => t.id === itemizeTxnId)
         if (!txn) return null
         const realMembers = members.filter(m => !m.is_placeholder)
@@ -2305,21 +2337,32 @@ export default function TransactionsPage() {
             transaction={txn}
             members={realMembers}
             currency={group?.base_currency || 'USD'}
-            onClose={() => setItemizeTxnId(null)}
+            initialItems={pendingOcrItems || undefined}
+            onClose={() => { setItemizeTxnId(null); setPendingOcrItems(null) }}
           />
         )
       })()}
 
       {/* Add Expense modal — rendered as a portal-style overlay on top of everything.
           autoSnap=true tells it to auto-fire the camera input on mount, used by
-          the "Snap a receipt" path on the Add Expenses picker. */}
+          the "Snap a receipt" path on the Add Expenses picker.
+          onSaved receives (newTxn, ocrItems): if ocrItems is non-null we open
+          ItemizeSheet on the freshly-created transaction so the user can tap
+          mine/yours/shared on each line — turning a 30-second receipt-then-itemize
+          flow into a 5-second one. */}
       {showAddExpense && members.length > 0 && (
         <AddExpenseModal
           groupId={groupId}
           members={members}
-          group={group}   // needed so the modal knows the group's base currency
+          group={group}
           onClose={() => { setShowAddExpense(false); setAutoSnapOnOpen(false) }}
           autoSnap={autoSnapOnOpen}
+          onSaved={(newTxn, ocrItems) => {
+            if (newTxn && ocrItems && ocrItems.length >= 2) {
+              setPendingOcrItems(ocrItems)
+              setItemizeTxnId(newTxn.transaction_id || newTxn.id)
+            }
+          }}
         />
       )}
 
