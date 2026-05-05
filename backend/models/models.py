@@ -222,6 +222,49 @@ class MerchantRule(Base):
     )
 
 
+class RecurringExpense(Base):
+    """
+    A template that auto-generates the same transaction on a schedule.
+
+    Built for the couples / household use case: rent every month on the 1st,
+    Netflix on the 15th, etc. Settings carry over: same amount, same payer,
+    same split rule, same category.
+
+    Generation strategy: lazy. On each transactions-list fetch, the backend
+    fills in any missing past instances up to today. No background cron
+    required — keeps deployment simple. Tradeoff is that an inactive trip
+    won't generate until someone opens it, which is fine (the math still
+    works correctly when they do).
+    """
+    __tablename__ = "recurring_expenses"
+
+    id = Column(Integer, primary_key=True, index=True)
+    group_id = Column(Integer, ForeignKey("groups.id"), nullable=False, index=True)
+    name = Column(String, nullable=False)               # "Rent", "Netflix", "Gym"
+    amount = Column(Float, nullable=False)              # in the group's base currency
+    currency = Column(String, default="USD", nullable=False)
+    paid_by_member_id = Column(Integer, nullable=False)
+    # Same shape as Transaction.participants_json
+    participants_json = Column(JSON, nullable=True)
+    # Same shape as Transaction.split_method_json (defaults to equal)
+    split_method_json = Column(JSON, nullable=True)
+    category = Column(String, nullable=True)
+    # Frequency: "monthly" is the only option for v1. Future: "weekly", "biweekly".
+    frequency = Column(String, nullable=False, default="monthly")
+    # 1..28 — capped at 28 so we don't have to worry about Feb 30. Months
+    # with fewer days just generate on the last available day; we use 28
+    # as the explicit ceiling.
+    day_of_month = Column(Integer, nullable=False, default=1)
+    # When the recurring schedule should start generating. ISO date string.
+    start_date = Column(String, nullable=False)
+    # The most-recent date we've already generated a transaction for. Lets
+    # the catch-up loop skip already-generated instances. Updated on every
+    # generation pass.
+    last_generated_date = Column(String, nullable=True)
+    active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
 class TripShare(Base):
     """
     A shareable read-only link for a trip's settlement summary.

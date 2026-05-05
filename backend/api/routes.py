@@ -33,7 +33,10 @@ from schemas.schemas import (
     FeedbackCreate, FeedbackResponse,
     TripShareCreate, TripShareResponse, PublicTripView, PublicMember, PublicTransfer,
     InvitePreview, JoinTripRequest, JoinTripResponse,
+    RecurringExpenseCreate, RecurringExpenseResponse,
 )
+from models.models import RecurringExpense
+from services.recurring_service import generate_due_for_group
 from services.import_service import import_statement, import_csv_statement, save_merchant_rule, create_manual_transaction
 from services.settlement_service import (
     compute_settlement, export_settlement_csv, export_settlement_json
@@ -599,8 +602,18 @@ def list_transactions(
 
 @router.get("/groups/{group_id}/transactions", response_model=List[TransactionResponse])
 def list_group_transactions(group_id: int, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
-    """Get all transactions across all statements for a group."""
+    """Get all transactions across all statements for a group.
+
+    Also runs the recurring-expense catch-up generator first so any due
+    rent/utility transactions appear in the list. Lazy generation = no cron
+    needed; the user's own page-load fills in any missed past instances.
+    Wrapped in try/except so a recurring bug never blocks transaction listing.
+    """
     _require_group(group_id, user_id, db)
+    try:
+        generate_due_for_group(group_id, db)
+    except Exception:
+        db.rollback()
     stmt_ids = [s.id for s in db.query(Statement).filter_by(group_id=group_id).all()]
     if not stmt_ids:
         return []
@@ -610,6 +623,106 @@ def list_group_transactions(group_id: int, user_id: str = Depends(get_current_us
         .order_by(Transaction.posted_date.desc())
         .all()
     )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# RECURRING EXPENSES  (rent / utilities / monthly bills)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/groups/{group_id}/recurring", response_model=List[RecurringExpenseResponse])
+def list_recurring(
+    group_id: int,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """List all recurring-expense templates for a group, newest first."""
+    _require_group(group_id, user_id, db)
+    return (
+        db.query(RecurringExpense)
+        .filter_by(group_id=group_id)
+        .order_by(RecurringExpense.created_at.desc())
+        .all()
+    )
+
+
+@router.post("/groups/{group_id}/recurring", response_model=RecurringExpenseResponse)
+def create_recurring(
+    group_id: int,
+    body: RecurringExpenseCreate,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """
+    Create a recurring expense template (e.g. monthly rent). Generates the
+    first transaction immediately if start_date is on or before today.
+    """
+    _require_group(group_id, user_id, db)
+    # Cap day_of_month at 28 — months with fewer days would otherwise need
+    # last-day fallback logic; avoid the foot-gun by clamping at the API layer.
+    day = max(1, min(body.day_of_month, 28))
+    if body.frequency != "monthly":
+        raise HTTPException(status_code=400, detail="Only 'monthly' frequency is supported in v1.")
+    rec = RecurringExpense(
+        group_id=group_id,
+        name=body.name.strip(),
+        amount=body.amount,
+        currency=body.currency or "USD",
+        paid_by_member_id=body.paid_by_member_id,
+        participants_json=body.participants_json,
+        split_method_json=body.split_method_json or {"type": "equal"},
+        category=body.category,
+        frequency="monthly",
+        day_of_month=day,
+        start_date=body.start_date,
+        active=body.active,
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+    # Catch-up: if start_date is in the past, generate retroactively.
+    try:
+        generate_due_for_group(group_id, db)
+        db.refresh(rec)
+    except Exception:
+        db.rollback()
+    return rec
+
+
+@router.delete("/recurring/{recurring_id}")
+def delete_recurring(
+    recurring_id: int,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """
+    Delete a recurring template. Already-generated past transactions are
+    NOT removed (they're real, settled-against records); this just stops
+    future generation.
+    """
+    rec = db.query(RecurringExpense).filter_by(id=recurring_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Recurring expense not found")
+    _require_group(rec.group_id, user_id, db)
+    db.delete(rec)
+    db.commit()
+    return {"ok": True}
+
+
+@router.put("/recurring/{recurring_id}/toggle", response_model=RecurringExpenseResponse)
+def toggle_recurring(
+    recurring_id: int,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Pause/resume generation. Useful for 'we're moving out next month'."""
+    rec = db.query(RecurringExpense).filter_by(id=recurring_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Recurring expense not found")
+    _require_group(rec.group_id, user_id, db)
+    rec.active = not rec.active
+    db.commit()
+    db.refresh(rec)
+    return rec
 
 
 @router.get("/groups/{group_id}/transactions/export-csv")

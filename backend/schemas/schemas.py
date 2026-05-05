@@ -168,6 +168,39 @@ class SetItemsRequest(BaseModel):
     """Body for PUT /transactions/{id}/items. Empty list = clear, single-amount mode."""
     items: List[TransactionItem]
 
+
+# ─── Recurring expenses (households / monthly bills) ──────────────────────────
+
+class RecurringExpenseCreate(BaseModel):
+    name: str                              # "Rent", "Netflix"
+    amount: float
+    currency: str = "USD"
+    paid_by_member_id: int
+    participants_json: Optional[dict] = None    # null = everyone splits
+    split_method_json: Optional[dict] = None    # null = equal
+    category: Optional[str] = None
+    frequency: str = "monthly"             # only 'monthly' for v1
+    day_of_month: int = 1                  # 1..28
+    start_date: str                        # ISO yyyy-mm-dd
+    active: bool = True
+
+class RecurringExpenseResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    group_id: int
+    name: str
+    amount: float
+    currency: str
+    paid_by_member_id: int
+    participants_json: Optional[dict] = None
+    split_method_json: Optional[dict] = None
+    category: Optional[str] = None
+    frequency: str
+    day_of_month: int
+    start_date: str
+    last_generated_date: Optional[str] = None
+    active: bool
+
 class BulkTransactionUpdate(BaseModel):
     """Bulk-update multiple transactions at once — the core trip workflow."""
     transaction_ids: List[int]

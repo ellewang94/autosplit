@@ -151,6 +151,34 @@ def run_migrations():
                 except Exception:
                     conn.rollback()
 
+        # Create the recurring_expenses table if it doesn't exist yet.
+        # Templates that auto-generate transactions monthly (rent, utilities,
+        # subscriptions). Backed by the lazy catch-up generator at read time.
+        try:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS recurring_expenses (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    group_id INTEGER NOT NULL REFERENCES groups(id),
+                    name VARCHAR NOT NULL,
+                    amount FLOAT NOT NULL,
+                    currency VARCHAR NOT NULL DEFAULT 'USD',
+                    paid_by_member_id INTEGER NOT NULL,
+                    participants_json JSON,
+                    split_method_json JSON,
+                    category VARCHAR,
+                    frequency VARCHAR NOT NULL DEFAULT 'monthly',
+                    day_of_month INTEGER NOT NULL DEFAULT 1,
+                    start_date VARCHAR NOT NULL,
+                    last_generated_date VARCHAR,
+                    active """ + ("BOOLEAN NOT NULL DEFAULT TRUE" if _IS_POSTGRES else "INTEGER NOT NULL DEFAULT 1") + """,
+                    created_at DATETIME
+                )
+            """))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_recurring_expenses_group_id ON recurring_expenses(group_id)"))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
         # Create the trip_shares table if it doesn't exist yet.
         # We can't use ALTER TABLE for a whole new table, so we use CREATE TABLE IF NOT EXISTS.
         # This is safe to run every startup — the IF NOT EXISTS clause prevents duplicates.
