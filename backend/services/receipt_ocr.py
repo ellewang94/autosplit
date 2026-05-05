@@ -35,14 +35,20 @@ logger = logging.getLogger(__name__)
 
 # Configurable so tests can override; we want a single env var on Railway.
 ANTHROPIC_API_KEY_ENV = "ANTHROPIC_API_KEY"
-# Sonnet 4.6 is the default — fast, cheap, vision-capable. Opus 4.7 would
-# give marginally better extraction at ~5x cost; not worth it for receipts.
-DEFAULT_MODEL = "claude-sonnet-4-6"
+# Haiku 4.5 is the default — vision-capable, ~3-5x cheaper than Sonnet, plenty
+# smart for the structured extraction we need (amount, merchant, date, items).
+# Pre-monetization, every cent matters. Switch to Sonnet 4.6 only if Haiku
+# starts mis-reading receipts in production (override per-call via the model
+# arg in parse_receipt). Opus 4.7 would be overkill for receipts — don't.
+DEFAULT_MODEL = "claude-haiku-4-5-20251001"
 
-# Max edge length we send to Claude. 1568 covers 95% of receipt readability
-# without bloating the request. JPEG quality 85 is the visual indistinguishable
-# point on photographic content.
-MAX_EDGE = 1568
+# Max edge length we send to Claude. 1024 is the sweet spot for receipts:
+# the printed text is still legible to vision models at this resolution, but
+# it's ~40% fewer image tokens than 1568 (image tokens scale with pixel area).
+# JPEG quality 85 is visually indistinguishable on photographic content.
+# Bumped down from 1568 to optimize cost while staying above the legibility
+# floor for typical phone photos of paper receipts.
+MAX_EDGE = 1024
 JPEG_QUALITY = 85
 
 # Anthropic's vision API caps at 5 MB per image after encoding. We hard-cap
