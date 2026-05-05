@@ -1,24 +1,32 @@
 """
-Receipt OCR via Claude vision.
+Receipt OCR — extract structured data from a receipt photo.
 
-Takes an uploaded image (typically a phone photo of a paper receipt), runs
-it through the Claude API with a structured extraction prompt, and returns
-a normalised dict that the frontend uses to pre-fill the Add Expense form.
+Two providers supported:
+
+    Gemini 2.0 Flash (Google)   — DEFAULT. Free tier covers ~1500 receipts/day,
+                                   which is plenty for an early-stage product.
+                                   Set GEMINI_API_KEY in env to use.
+
+    Claude Haiku 4.5 (Anthropic) — fallback. Cheap (~$0.001/receipt with
+                                   prompt caching) but not free. Set
+                                   ANTHROPIC_API_KEY in env to use.
+
+The dispatcher picks whichever has its key set, preferring Gemini for cost.
+If neither is set, parse_receipt raises a clear error so the route returns
+a 422 the user can act on.
+
+Both providers receive the same downscaled JPEG and the same JSON-only
+prompt, so the return shape is identical and downstream code doesn't care
+which one ran.
 
 Design choices:
-- We downscale the image to max 1568x1568 before sending. The Anthropic
-  vision endpoint accepts up to 8000x8000 but pricing is by token count,
-  and 1568 is the sweet spot for legible receipt text without burning
-  cash. Receipts are skinny / tall, so we cap on the longer side and
-  preserve aspect ratio.
-- The system prompt is wrapped in a `cache_control` block so subsequent
-  receipt uploads in the same 5-minute window cost less. The user-supplied
-  image varies, so it stays uncached.
+- We downscale the image to max 1024 on the long edge before sending. The
+  printed text on a receipt is still legible to a vision model at this size,
+  but it's ~40% fewer image tokens than 1568. JPEG quality 85 is the
+  visually-indistinguishable point on photographic content.
 - We always return a dict with the same keys (`amount`, `merchant`, etc.)
-  set to None when Claude can't read them, never raise on missing fields.
-  The user can correct anything before saving.
-- We use the Claude Sonnet 4.6 model (per the project's general
-  guidance — fast, cheap enough for OCR, and vision-capable).
+  set to None when the model can't read them. The user can correct anything
+  before saving — never auto-submit.
 """
 
 import base64
@@ -33,27 +41,19 @@ from PIL import Image
 
 logger = logging.getLogger(__name__)
 
-# Configurable so tests can override; we want a single env var on Railway.
+GEMINI_API_KEY_ENV = "GEMINI_API_KEY"
 ANTHROPIC_API_KEY_ENV = "ANTHROPIC_API_KEY"
-# Haiku 4.5 is the default — vision-capable, ~3-5x cheaper than Sonnet, plenty
-# smart for the structured extraction we need (amount, merchant, date, items).
-# Pre-monetization, every cent matters. Switch to Sonnet 4.6 only if Haiku
-# starts mis-reading receipts in production (override per-call via the model
-# arg in parse_receipt). Opus 4.7 would be overkill for receipts — don't.
-DEFAULT_MODEL = "claude-haiku-4-5-20251001"
 
-# Max edge length we send to Claude. 1024 is the sweet spot for receipts:
-# the printed text is still legible to vision models at this resolution, but
-# it's ~40% fewer image tokens than 1568 (image tokens scale with pixel area).
-# JPEG quality 85 is visually indistinguishable on photographic content.
-# Bumped down from 1568 to optimize cost while staying above the legibility
-# floor for typical phone photos of paper receipts.
+# Gemini 2.0 Flash: vision-capable, free tier ~1500 RPD. The "001" suffix
+# pins to the stable variant; remove if you want auto-rolling latest.
+GEMINI_MODEL = "gemini-2.0-flash-001"
+# Anthropic fallback. Haiku 4.5 — vision, cheap, plenty smart for receipts.
+ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
+
+# Max edge length we send. 1024 is the sweet spot for receipts.
 MAX_EDGE = 1024
 JPEG_QUALITY = 85
-
-# Anthropic's vision API caps at 5 MB per image after encoding. We hard-cap
-# uploads at 8 MB to leave headroom; bigger files almost always indicate a
-# user uploading something other than a phone snap.
+# Hard cap on uploads — anything above is almost certainly not a phone snap.
 MAX_UPLOAD_BYTES = 8 * 1024 * 1024
 
 
@@ -85,6 +85,23 @@ class OCRError(Exception):
     """Raised when the OCR pipeline can't produce a usable result."""
 
 
+# ── Provider dispatch ─────────────────────────────────────────────────────────
+
+def _which_provider() -> str:
+    """
+    Pick the OCR provider for this request based on which API keys are set.
+    Preference order: Gemini (free tier) > Anthropic. Returns 'gemini',
+    'anthropic', or '' (no provider available).
+    """
+    if os.getenv(GEMINI_API_KEY_ENV):
+        return "gemini"
+    if os.getenv(ANTHROPIC_API_KEY_ENV):
+        return "anthropic"
+    return ""
+
+
+# ── Image preprocessing (provider-agnostic) ───────────────────────────────────
+
 def _downscale_image(raw: bytes) -> tuple[bytes, str]:
     """
     Validate the uploaded bytes are a real image, downscale if oversized,
@@ -101,14 +118,11 @@ def _downscale_image(raw: bytes) -> tuple[bytes, str]:
         from PIL import ImageOps
         img = ImageOps.exif_transpose(img)
     except Exception:
-        # ImageOps.exif_transpose can fail on weird files — just continue
         pass
 
-    # Convert to RGB (JPEG can't store alpha; many phone photos are RGBA)
     if img.mode not in ("RGB", "L"):
         img = img.convert("RGB")
 
-    # Cap on the longer edge, preserve aspect ratio
     w, h = img.size
     longest = max(w, h)
     if longest > MAX_EDGE:
@@ -122,11 +136,10 @@ def _downscale_image(raw: bytes) -> tuple[bytes, str]:
 
 def _extract_json(raw_text: str) -> dict:
     """
-    Parse Claude's response into a dict. We ask for raw JSON in the system
-    prompt, but defensively strip ```json fences if it slips one in anyway.
+    Parse the model response into a dict. We ask for raw JSON in the prompt,
+    but defensively strip ```json fences if a model slips one in anyway.
     """
     s = raw_text.strip()
-    # Strip code fences if any
     if s.startswith("```"):
         s = re.sub(r"^```[a-zA-Z]*\n?", "", s)
         s = re.sub(r"\n?```$", "", s)
@@ -139,9 +152,8 @@ def _extract_json(raw_text: str) -> dict:
 
 def _normalise_result(data: dict) -> dict:
     """
-    Ensure the returned dict has every expected key with a sensible default.
-    The frontend treats `null` and missing-key the same, but having a
-    consistent shape makes the API contract cleaner.
+    Ensure the returned dict has every expected key with a sensible default
+    so the frontend always sees a consistent shape regardless of provider.
     """
     def num_or_none(v):
         if v is None:
@@ -173,40 +185,66 @@ def _normalise_result(data: dict) -> dict:
     }
 
 
-def parse_receipt(image_bytes: bytes, model: Optional[str] = None) -> dict:
-    """
-    Run a receipt image through Claude vision and return a structured dict.
+# ── Provider implementations ──────────────────────────────────────────────────
 
-    Raises OCRError if the API key is missing, the image is unreadable, or
-    Claude's response can't be parsed. The caller (route handler) should
-    convert that into an HTTPException.
+def _parse_with_gemini(image_bytes: bytes, media_type: str) -> dict:
+    """
+    Call Google Gemini 2.0 Flash. Free tier of ~1500 RPD covers MVP usage
+    forever. JSON-mode response so we don't have to babysit the output.
+    """
+    api_key = os.getenv(GEMINI_API_KEY_ENV)
+    if not api_key:
+        raise OCRError(f"{GEMINI_API_KEY_ENV} is not set")
+
+    try:
+        import google.generativeai as genai
+    except ImportError as e:
+        raise OCRError(f"google-generativeai SDK not installed: {e}")
+
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel(
+        GEMINI_MODEL,
+        # response_mime_type='application/json' would let us skip _extract_json
+        # but it's a relatively recent capability; use the same JSON-fence-tolerant
+        # parser as Anthropic to keep things robust.
+        generation_config={
+            "temperature": 0,        # deterministic for OCR
+            "max_output_tokens": 1024,
+        },
+    )
+    try:
+        response = model.generate_content([
+            SYSTEM_PROMPT,
+            {"mime_type": media_type, "data": image_bytes},
+            "Parse this receipt and return the JSON described above.",
+        ])
+    except Exception as e:
+        raise OCRError(f"Gemini API call failed: {e}")
+
+    text = (response.text or "").strip()
+    if not text:
+        raise OCRError("Gemini returned empty content for the receipt.")
+    return _extract_json(text)
+
+
+def _parse_with_anthropic(image_bytes: bytes, media_type: str) -> dict:
+    """
+    Fallback to Claude Haiku 4.5. Same prompt, same shape. System prompt
+    is wrapped in a cache_control block so repeat uploads in the 5-minute
+    window cost less.
     """
     api_key = os.getenv(ANTHROPIC_API_KEY_ENV)
     if not api_key:
-        raise OCRError("Receipt OCR is not configured (missing ANTHROPIC_API_KEY).")
+        raise OCRError(f"{ANTHROPIC_API_KEY_ENV} is not set")
 
-    if len(image_bytes) > MAX_UPLOAD_BYTES:
-        raise OCRError(
-            f"Receipt image is too large ({len(image_bytes) // 1024} KB). "
-            f"Please upload an image under {MAX_UPLOAD_BYTES // (1024 * 1024)} MB."
-        )
-
-    encoded, media_type = _downscale_image(image_bytes)
-
-    # Lazy import so the rest of the backend can boot without the SDK installed
-    # (e.g. during the initial pip install on Railway).
     try:
         from anthropic import Anthropic
     except ImportError as e:
-        raise OCRError(f"Anthropic SDK not installed: {e}")
+        raise OCRError(f"anthropic SDK not installed: {e}")
 
     client = Anthropic(api_key=api_key)
-
-    # The system prompt is cacheable — it doesn't change between requests.
-    # Only pass the image as the (uncached) user content. Even a couple of
-    # OCR calls in a 5-minute window will start hitting cache.
     response = client.messages.create(
-        model=model or DEFAULT_MODEL,
+        model=ANTHROPIC_MODEL,
         max_tokens=1024,
         system=[
             {
@@ -224,7 +262,7 @@ def parse_receipt(image_bytes: bytes, model: Optional[str] = None) -> dict:
                         "source": {
                             "type": "base64",
                             "media_type": media_type,
-                            "data": base64.standard_b64encode(encoded).decode("ascii"),
+                            "data": base64.standard_b64encode(image_bytes).decode("ascii"),
                         },
                     },
                     {
@@ -236,12 +274,58 @@ def parse_receipt(image_bytes: bytes, model: Optional[str] = None) -> dict:
         ],
     )
 
-    # Extract the text content from Claude's response. The SDK returns a
-    # list of content blocks; for a JSON-only response there's just one.
     text_parts = [b.text for b in response.content if getattr(b, "type", None) == "text"]
     if not text_parts:
         raise OCRError("Claude returned no text content for the receipt.")
-    raw = "".join(text_parts)
+    return _extract_json("".join(text_parts))
 
-    parsed = _extract_json(raw)
-    return _normalise_result(parsed)
+
+# ── Public entry point ────────────────────────────────────────────────────────
+
+def parse_receipt(image_bytes: bytes, model: Optional[str] = None) -> dict:
+    """
+    Run a receipt image through whichever OCR provider is configured and
+    return a structured dict. Provider preference: Gemini > Anthropic.
+
+    Raises OCRError if no API key is set, the image is unreadable, or the
+    provider response can't be parsed. The route handler maps that to a 422.
+    """
+    provider = _which_provider()
+    if not provider:
+        raise OCRError(
+            "Receipt OCR is not configured. Set GEMINI_API_KEY (free tier, recommended) "
+            "or ANTHROPIC_API_KEY in the backend environment."
+        )
+
+    if len(image_bytes) > MAX_UPLOAD_BYTES:
+        raise OCRError(
+            f"Receipt image is too large ({len(image_bytes) // 1024} KB). "
+            f"Please upload an image under {MAX_UPLOAD_BYTES // (1024 * 1024)} MB."
+        )
+
+    encoded, media_type = _downscale_image(image_bytes)
+
+    # Try the preferred provider; fall back to the other one if it errors out
+    # (lets a temporary outage of one not break the feature).
+    try:
+        if provider == "gemini":
+            data = _parse_with_gemini(encoded, media_type)
+        else:
+            data = _parse_with_anthropic(encoded, media_type)
+    except OCRError as primary_err:
+        # Try the other provider if its key is also set
+        other = "anthropic" if provider == "gemini" else "gemini"
+        if (other == "gemini" and os.getenv(GEMINI_API_KEY_ENV)) or \
+           (other == "anthropic" and os.getenv(ANTHROPIC_API_KEY_ENV)):
+            logger.warning("Primary OCR provider %s failed (%s) — trying %s", provider, primary_err, other)
+            try:
+                if other == "gemini":
+                    data = _parse_with_gemini(encoded, media_type)
+                else:
+                    data = _parse_with_anthropic(encoded, media_type)
+            except OCRError:
+                raise primary_err
+        else:
+            raise
+
+    return _normalise_result(data)
