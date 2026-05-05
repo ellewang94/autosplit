@@ -112,6 +112,10 @@ def run_migrations():
             # behaviour: dates, end-of-trip settle. 'household' hides dates and
             # supports recurring expenses for ongoing roommate / couple ledgers.
             ("groups", "kind", "VARCHAR NOT NULL DEFAULT 'trip'"),
+            # Transactions table — per-item breakdown for mixed receipts/statements
+            # (some items mine, some yours, some shared). Nullable: most txns
+            # stay as a single shared amount.
+            ("transactions", "items_json", "JSON"),
         ]
 
         for table, column, definition in new_columns:

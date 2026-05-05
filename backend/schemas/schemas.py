@@ -152,6 +152,21 @@ class TransactionResponse(BaseModel):
     # Multi-currency fields — frontend uses these to show "¥5,000 (≈$33.50)"
     currency: str = "USD"                   # The currency the charge was made in
     original_amount: Optional[float] = None # Amount in foreign currency (null if same as base)
+    # Per-item breakdown (mixed receipts / statements). Null = whole-txn split.
+    # See Transaction model for schema.
+    items_json: Optional[List[dict]] = None
+
+
+class TransactionItem(BaseModel):
+    """One line item inside a transaction. Sum of items must equal txn amount."""
+    name: str
+    amount: float
+    member_ids: List[int]    # which members share this specific item
+
+
+class SetItemsRequest(BaseModel):
+    """Body for PUT /transactions/{id}/items. Empty list = clear, single-amount mode."""
+    items: List[TransactionItem]
 
 class BulkTransactionUpdate(BaseModel):
     """Bulk-update multiple transactions at once — the core trip workflow."""

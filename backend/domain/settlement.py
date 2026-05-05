@@ -62,15 +62,19 @@ def compute_net_balances(
         if txn.is_personal:
             continue
 
+        # Determine which path applies before crediting the payer. A txn with
+        # neither items nor participants is unassigned and should be skipped
+        # entirely (no credit, no debit) — that matches the pre-items behaviour
+        # so existing tests pass.
+        # Explicit `isinstance(..., list)` so test MagicMocks (which auto-create
+        # a truthy attribute on access) don't accidentally enter the items path.
+        items_attr = getattr(txn, "items_json", None)
+        items = items_attr if isinstance(items_attr, list) and items_attr else None
         participants = txn.participants_json or {}
         participant_ids = participants.get("member_ids", [])
 
-        # Skip transactions with no participants assigned yet
-        if not participant_ids:
+        if not items and not participant_ids:
             continue
-
-        split_method = txn.split_method_json or {"type": "equal"}
-        shares = compute_shares(txn.amount, split_method, participant_ids)
 
         # Figure out who actually paid for this transaction.
         # Multi-card: look up the card holder for this specific statement.
@@ -80,6 +84,29 @@ def compute_net_balances(
         # The card holder paid the full transaction amount
         # → their balance goes UP by the full amount
         balances[actual_payer] = balances.get(actual_payer, 0.0) + txn.amount
+
+        # ── Per-item path ────────────────────────────────────────────────
+        # If the user broke this transaction into items (some mine, some
+        # his, some shared), each item has its own participants. Allocate
+        # each item's amount independently — the txn-level participants /
+        # split_method are ignored when items are set.
+        if items:
+            for item in items:
+                amt = float(item.get("amount") or 0)
+                ids = item.get("member_ids") or []
+                if amt <= 0 or not ids:
+                    continue
+                # Items default to equal split between their listed participants.
+                # (We could let each item carry its own split_method later if
+                # someone needs e.g. "this item is 60/40".)
+                share = round(amt / len(ids), 2)
+                for mid in ids:
+                    balances[mid] = balances.get(mid, 0.0) - share
+            continue  # done with this transaction
+
+        # ── Whole-transaction path (legacy, the common case) ─────────────
+        split_method = txn.split_method_json or {"type": "equal"}
+        shares = compute_shares(txn.amount, split_method, participant_ids)
 
         # Each participant owes their share
         # → their balance goes DOWN by their share

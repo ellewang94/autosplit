@@ -25,6 +25,7 @@ from schemas.schemas import (
     MemberCreate, MemberCreateAdvanced, MemberResponse, PaymentHandles,
     InviteSlotsRequest, InviteSlotsResponse, RecentCollaborator,
     StatementResponse, TransactionResponse, TransactionUpdate, BulkTransactionUpdate,
+    SetItemsRequest,
     MerchantRuleCreate, MerchantRuleResponse,
     SettlementRequest, SettlementResponse, UploadResponse,
     SaveMerchantRuleRequest,
@@ -767,6 +768,71 @@ def update_transaction(
         txn.split_method_json = body.split_method_json
 
     txn.overrides_json = overrides
+    db.commit()
+    db.refresh(txn)
+    return txn
+
+
+@router.put("/transactions/{txn_id}/items", response_model=TransactionResponse)
+def set_transaction_items(
+    txn_id: int,
+    body: SetItemsRequest,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """
+    Break a transaction into per-item splits (mixed receipts/statements).
+
+    Empty items list = clear itemization, revert to whole-transaction split.
+    Non-empty: each item has name + amount + member_ids that share it. Items
+    sum MUST equal the transaction amount (within 1 cent of slop, since
+    floats). Settlement.compute_net_balances expands items at compute time.
+
+    The whole-transaction participants_json + split_method_json are left
+    intact so the user can revert (clear items) without losing settings.
+    """
+    txn = _require_transaction(txn_id, user_id, db)
+
+    if not body.items:
+        # Clear itemization — back to whole-transaction split
+        txn.items_json = None
+        db.commit()
+        db.refresh(txn)
+        return txn
+
+    # Validate: each item has at least one participant + a positive amount
+    for item in body.items:
+        if item.amount <= 0:
+            raise HTTPException(status_code=400, detail=f"Item '{item.name}' must have a positive amount.")
+        if not item.member_ids:
+            raise HTTPException(status_code=400, detail=f"Item '{item.name}' needs at least one participant.")
+
+    # Validate: sum of items matches transaction amount within 1c tolerance
+    items_total = sum(i.amount for i in body.items)
+    if abs(items_total - txn.amount) > 0.01:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Items add up to {items_total:.2f} but the transaction is {txn.amount:.2f}.",
+        )
+
+    # Validate: every member_id actually belongs to this group (don't allow
+    # cross-group leakage from a stale frontend cache)
+    txn_stmt = db.query(Statement).filter_by(id=txn.statement_id).first()
+    if not txn_stmt:
+        raise HTTPException(status_code=404, detail="Transaction's statement not found.")
+    valid_ids = {
+        m.id for m in db.query(Member).filter_by(group_id=txn_stmt.group_id).all()
+        if not getattr(m, "is_placeholder", False)
+    }
+    for item in body.items:
+        for mid in item.member_ids:
+            if mid not in valid_ids:
+                raise HTTPException(status_code=400, detail=f"Member {mid} isn't in this group.")
+
+    txn.items_json = [
+        {"name": i.name.strip(), "amount": round(i.amount, 2), "member_ids": list(i.member_ids)}
+        for i in body.items
+    ]
     db.commit()
     db.refresh(txn)
     return txn

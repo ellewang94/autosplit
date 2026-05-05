@@ -165,6 +165,22 @@ class Transaction(Base):
     #   {"type": "exact", "amounts": {"1": 45.00, "2": 23.50}}
     split_method_json = Column(JSON, nullable=True)
 
+    # Per-item breakdown for "some items are mine, some are his, some are shared".
+    # When set, this OVERRIDES participants_json + split_method_json — settlement
+    # expands each item into its own slice. Each item has its own participants
+    # so a single Whole Foods $80 charge can become $20 mine, $30 his, $30 shared.
+    #
+    # Schema: list of items, each with name + amount + participants. The sum
+    # MUST equal the transaction amount (validated at write time + at compute time).
+    #
+    # Example:
+    #   [
+    #     { "name": "Wine",       "amount": 20.00, "member_ids": [12] },
+    #     { "name": "Protein",    "amount": 30.00, "member_ids": [13] },
+    #     { "name": "Groceries",  "amount": 30.00, "member_ids": [12, 13] }
+    #   ]
+    items_json = Column(JSON, nullable=True)
+
     # Any manual overrides the user made (for audit + merchant rule learning)
     overrides_json = Column(JSON, nullable=True, default=dict)
 
