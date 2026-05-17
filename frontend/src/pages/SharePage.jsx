@@ -61,8 +61,8 @@ const AVATAR_COLORS = [
   'bg-green-400 text-ink-950',
   'bg-amber-400 text-ink-950',
   'bg-red-400 text-white',
-  'bg-blue-400 text-white',
-  'bg-purple-400 text-white',
+  'bg-ink-600 text-ink-50',
+  'bg-ink-700 text-ink-50',
 ]
 
 function Avatar({ name, index, size = 'md' }) {
@@ -98,6 +98,14 @@ function TransferRow({ transfer, currency, index, memberIndex, tripName }) {
   const [showMessage, setShowMessage] = useState(false)
   const [copied, setCopied] = useState(false)
 
+  // Reset the "copied!" indicator after 2s with cleanup so we don't setState
+  // on an unmounted component if the user navigates away mid-toast.
+  useEffect(() => {
+    if (!copied) return
+    const id = setTimeout(() => setCopied(false), 2000)
+    return () => clearTimeout(id)
+  }, [copied])
+
   // Build the note that goes into payment apps: e.g. "Japan Trip 2026 expenses"
   const paymentNote = tripName ? `${tripName} expenses` : 'Trip expenses'
   const links = buildPaymentLinks(transfer.amount, paymentNote)
@@ -105,7 +113,6 @@ function TransferRow({ transfer, currency, index, memberIndex, tripName }) {
   function copyMessage() {
     navigator.clipboard.writeText(transfer.payment_request)
     setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
   }
 
   return (

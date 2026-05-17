@@ -80,10 +80,17 @@ function PayLinkButton({ option }) {
 function ZelleHelper({ option, payee }) {
   const [copied, setCopied] = useState(false)
 
+  // Reset the "copied" indicator via a cleanup-safe effect so we don't
+  // setState after unmount when the user navigates away mid-toast.
+  useEffect(() => {
+    if (!copied) return
+    const id = setTimeout(() => setCopied(false), 2500)
+    return () => clearTimeout(id)
+  }, [copied])
+
   function copyAndAdvise() {
     navigator.clipboard?.writeText(option.copyValue)
     setCopied(true)
-    setTimeout(() => setCopied(false), 2500)
   }
 
   return (
@@ -91,9 +98,12 @@ function ZelleHelper({ option, payee }) {
       onClick={copyAndAdvise}
       className={clsx(
         'flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all',
+        // Brand color follows the same convention as Venmo/CashApp/PayPal
+        // (their official hex). Solid brand purple is fine — design system
+        // forbids purple gradients, not brand-faithful solid colors.
         copied
           ? 'bg-green-400/15 border-green-400/40 text-green-400'
-          : 'bg-purple-500/10 border-purple-500/40 text-purple-300 hover:bg-purple-500/20'
+          : 'bg-[#6C1ED1]/10 border-[#6C1ED1]/40 text-[#A879E8] hover:bg-[#6C1ED1]/20'
       )}
       title={`Copy ${payee?.name}'s Zelle handle, then open your bank app`}
     >

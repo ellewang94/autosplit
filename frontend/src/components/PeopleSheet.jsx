@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 import { useAuth } from '../contexts/AuthContext'
@@ -119,6 +119,14 @@ export default function PeopleSheet({ group, members, isOwner, onClose, onEditHa
   const [inviteUrl, setInviteUrl] = useState(null)
   const [copied, setCopied] = useState(false)
 
+  // Reset "copied!" indicator after 2.5s, with cleanup so unmounting
+  // mid-toast doesn't trigger a setState-on-unmounted warning.
+  useEffect(() => {
+    if (!copied) return
+    const id = setTimeout(() => setCopied(false), 2500)
+    return () => clearTimeout(id)
+  }, [copied])
+
   // ── Handlers ─────────────────────────────────────────────────────────────
   function handleAddByName(e) {
     e?.preventDefault()
@@ -155,7 +163,7 @@ export default function PeopleSheet({ group, members, isOwner, onClose, onEditHa
     if (!inviteUrl) return
     navigator.clipboard?.writeText(inviteUrl)
     setCopied(true)
-    setTimeout(() => setCopied(false), 2500)
+    // Reset is handled by the useEffect above.
   }
 
   function shareWhatsApp() {
@@ -517,8 +525,8 @@ const MEMBER_COLORS = [
   'bg-lime-400 text-ink-950',
   'bg-green-400 text-ink-950',
   'bg-amber-400 text-ink-950',
-  'bg-blue-400 text-white',
-  'bg-purple-400 text-white',
+  'bg-red-400 text-white',
+  'bg-ink-600 text-ink-50',
 ]
 function MEMBER_COLOR(i) {
   return MEMBER_COLORS[i % MEMBER_COLORS.length]

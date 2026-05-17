@@ -647,21 +647,29 @@ export default function UploadPage() {
                   </div>
                   <span className="text-xs font-mono text-ink-500 flex-shrink-0">{s.transaction_count} txns</span>
                   {isConfirming ? (
-                    <div className="flex items-center gap-1 flex-shrink-0">
-                      <span className="text-[10px] text-red-400">Delete?</span>
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      {/* Spell out the consequence so the user knows what's
+                          actually getting wiped — the transaction count
+                          right here makes "Yes" a deliberate click. */}
+                      <span className="text-[11px] text-red-400 font-medium">
+                        Delete {s.transaction_count} txn{s.transaction_count === 1 ? '' : 's'}?
+                      </span>
                       <button
-                        className="px-1.5 py-0.5 rounded text-[10px] bg-red-500 text-white hover:bg-red-400 transition-colors"
+                        className="px-2 py-0.5 rounded text-[10px] font-semibold bg-red-500 text-white hover:bg-red-400 transition-colors"
                         onClick={() => deleteStatement(s.id)}
-                      >Yes</button>
+                        aria-label={`Confirm deletion of statement with ${s.transaction_count} transactions`}
+                      >Delete</button>
                       <button
-                        className="px-1.5 py-0.5 rounded text-[10px] bg-ink-700 text-ink-300 hover:bg-ink-600 transition-colors"
+                        className="px-2 py-0.5 rounded text-[10px] bg-ink-700 text-ink-300 hover:bg-ink-600 transition-colors"
                         onClick={() => setConfirmDeleteId(null)}
-                      >No</button>
+                        aria-label="Cancel deletion"
+                      >Cancel</button>
                     </div>
                   ) : (
                     <button
                       className="p-1 rounded text-ink-600 hover:text-red-400 hover:bg-red-400/10 transition-all flex-shrink-0 sm:opacity-0 sm:group-hover:opacity-100"
                       title="Delete this statement and all its transactions"
+                      aria-label={`Delete statement (${s.transaction_count} transactions)`}
                       onClick={() => setConfirmDeleteId(s.id)}
                     >
                       <Trash2 size={13} />
