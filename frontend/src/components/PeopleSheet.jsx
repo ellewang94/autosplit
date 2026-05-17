@@ -86,16 +86,17 @@ export default function PeopleSheet({ group, members, isOwner, onClose, onEditHa
     },
   })
 
-  const reserveSlots = useMutation({
-    mutationFn: (count) => api.createInviteSlots(groupId, count),
+  // One universal invite link per group — no "how many?" prompt, no slot
+  // reservation. Anyone with the link joins as a real member with their own
+  // name. The backend re-uses the same invite_code on repeat calls so the
+  // owner never accidentally rotates a link friends already have.
+  const getInviteLink = useMutation({
+    mutationFn: () => api.getInviteLink(groupId),
     onSuccess: (data) => {
-      // Always rebuild the invite URL from the current browser origin rather
-      // than trusting the backend's invite_url. The backend builds it from
-      // FRONTEND_URL env or request.base_url, both of which can drift to a
-      // Vercel preview domain (e.g. frontend-nine-lac-33.vercel.app) instead
-      // of autosplit.co. The invite_code is canonical; we own the host.
-      const url = `${window.location.origin}/join/${data.invite_code}`
-      setInviteUrl(url)
+      // Rebuild URL from the current browser origin — the backend's
+      // invite_url may point to a stale Vercel preview domain, but the
+      // invite_code is canonical and we own the host.
+      setInviteUrl(`${window.location.origin}/join/${data.invite_code}`)
       qc.invalidateQueries(['group', String(groupId)])
       qc.invalidateQueries(['groups'])
     },
@@ -109,12 +110,6 @@ export default function PeopleSheet({ group, members, isOwner, onClose, onEditHa
   // trip (almost always: "the trip owner adds themselves first"). Once
   // claimed, defaults false so subsequent friends are added as themselves.
   const [claimAsSelf, setClaimAsSelf] = useState(!userClaimed)
-
-  // How many EXTRA people the owner is expecting (above what's already added).
-  // We seed this from the existing pending count so the slider lands on the
-  // current state, not 0.
-  const currentPending = members.filter((m) => m.is_placeholder).length
-  const [expectedCount, setExpectedCount] = useState(currentPending)
 
   const [inviteUrl, setInviteUrl] = useState(null)
   const [copied, setCopied] = useState(false)
@@ -150,13 +145,10 @@ export default function PeopleSheet({ group, members, isOwner, onClose, onEditHa
     })
   }
 
-  async function handleReserveAndShare() {
-    // Reserve the slots, then surface the link. Reserving is idempotent so
-    // the user can adjust the count and re-call without piling up extras.
-    // We rebuild the URL from window.location.origin (see mutation onSuccess
-    // for the rationale) — this overwrite is just defensive.
-    const data = await reserveSlots.mutateAsync(expectedCount)
-    setInviteUrl(`${window.location.origin}/join/${data.invite_code}`)
+  async function handleGetInviteLink() {
+    // One click — the backend either generates or returns the existing
+    // invite_code. No slot reservation, no count prompt.
+    await getInviteLink.mutateAsync()
   }
 
   function handleCopy() {
@@ -415,45 +407,15 @@ export default function PeopleSheet({ group, members, isOwner, onClose, onEditHa
                 Sending the link is faster — friends sign up in 30 seconds and can add their own statements.
               </p>
 
-              {/* Count selector */}
-              <div className="flex items-center justify-between mb-3 gap-3">
-                <label htmlFor="expected-count" className="text-xs text-ink-300">
-                  How many are you expecting?
-                </label>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setExpectedCount(Math.max(0, expectedCount - 1))}
-                    disabled={expectedCount <= 0}
-                    className="w-7 h-7 rounded-full border border-ink-700 hover:border-ink-500 disabled:opacity-30 text-ink-300 hover:text-ink-100 transition-colors flex items-center justify-center"
-                    aria-label="Decrease"
-                  >
-                    −
-                  </button>
-                  <div className="font-mono text-base font-bold text-ink-100 w-6 text-center">
-                    {expectedCount}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setExpectedCount(Math.min(10, expectedCount + 1))}
-                    disabled={expectedCount >= 10}
-                    className="w-7 h-7 rounded-full border border-ink-700 hover:border-ink-500 disabled:opacity-30 text-ink-300 hover:text-ink-100 transition-colors flex items-center justify-center"
-                    aria-label="Increase"
-                  >
-                    +
-                  </button>
-                </div>
-              </div>
-
               {!inviteUrl ? (
                 <button
-                  onClick={handleReserveAndShare}
-                  disabled={reserveSlots.isPending || expectedCount < 1}
+                  onClick={handleGetInviteLink}
+                  disabled={getInviteLink.isPending}
                   className="btn-primary w-full justify-center text-sm"
                 >
-                  {reserveSlots.isPending
-                    ? <><Loader size={13} className="animate-spin" /> Reserving slots…</>
-                    : <><Link2 size={13} /> {expectedCount === 1 ? 'Generate invite link for 1 person' : `Reserve ${expectedCount} slots & get link`}</>}
+                  {getInviteLink.isPending
+                    ? <><Loader size={13} className="animate-spin" /> Generating link…</>
+                    : <><Link2 size={13} /> Get invite link</>}
                 </button>
               ) : (
                 <div className="space-y-2">
@@ -494,13 +456,11 @@ export default function PeopleSheet({ group, members, isOwner, onClose, onEditHa
                     </button>
                   </div>
 
-                  {/* Edit count again */}
-                  <button
-                    onClick={() => setInviteUrl(null)}
-                    className="text-[11px] text-ink-500 hover:text-ink-300 transition-colors mt-1"
-                  >
-                    Change number of people →
-                  </button>
+                  {/* Anyone with the link can join — no need to "regenerate"
+                      it; the backend keeps the same code across calls. */}
+                  <p className="text-[11px] text-ink-500 mt-1">
+                    Anyone with this link can join — share it freely.
+                  </p>
                 </div>
               )}
             </section>

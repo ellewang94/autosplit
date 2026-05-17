@@ -37,6 +37,12 @@ class MemberResponse(BaseModel):
     group_id: int
     name: str
     has_account: bool = False   # True once this member claims their account via invite link
+    # Supabase UUID of the user who claimed this slot, if any. The frontend
+    # compares this against the signed-in user's id to know "is this slot me?"
+    # — used to hide the "That's me" button on already-claimed slots and on
+    # all slots once the current user has claimed one. Exposed only within
+    # the group (the endpoint already requires group membership).
+    user_id: Optional[str] = None
     payment_handles: Optional[PaymentHandles] = None
     is_placeholder: bool = False   # True for "(Pending)" slots awaiting a joiner
 

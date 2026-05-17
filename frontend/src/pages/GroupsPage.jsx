@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
+import clsx from 'clsx'
 import { api } from '../api/client'
 import { trackTripCreated } from '../lib/analytics'
 import OnboardingModal from '../components/OnboardingModal'
