@@ -9,14 +9,16 @@ Pydantic v2 automatically validates types, converts strings to ints, etc.
 If the data doesn't match the schema, FastAPI returns a 422 error automatically.
 """
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, List, Any
 
 
 # ─── Members ──────────────────────────────────────────────────────────────────
 
 class MemberCreate(BaseModel):
-    name: str
+    # Cap at 100 chars — protects the DB from megabyte-sized "names" that
+    # an attacker could spam to bloat storage or break the UI layout.
+    name: str = Field(..., min_length=1, max_length=100)
 
 class PaymentHandles(BaseModel):
     """
@@ -44,7 +46,7 @@ class MemberCreateAdvanced(BaseModel):
     `user_id` lets the owner pre-link a known person from past trips so they
     don't have to claim a slot via an invite link.
     """
-    name: str
+    name: str = Field(..., min_length=1, max_length=100)
     user_id: Optional[str] = None    # Supabase UUID, optional
     payment_handles: Optional[PaymentHandles] = None  # carry-over from past trip
 
@@ -73,11 +75,11 @@ class RecentCollaborator(BaseModel):
 # ─── Groups ───────────────────────────────────────────────────────────────────
 
 class GroupCreate(BaseModel):
-    name: str
+    name: str = Field(..., min_length=1, max_length=200)
     start_date: Optional[str] = None  # ISO date e.g. "2026-01-05"
     end_date: Optional[str] = None    # ISO date e.g. "2026-01-19"
     # The settlement currency for this group — all foreign expenses get converted to this
-    base_currency: str = "USD"
+    base_currency: str = Field("USD", min_length=3, max_length=8)
     # 'trip' (default) or 'household'. Controls UI framing and which features
     # apply (dates, recurring expenses, settle-period). Defaults to 'trip' so
     # existing call sites keep working.
@@ -294,11 +296,12 @@ class ManualTransactionCreate(BaseModel):
     - exchange_rate: how many base-currency units one foreign-currency unit is worth
                      (e.g. 0.0067 means 1 JPY = 0.0067 USD)
     """
-    posted_date: str                             # ISO date "YYYY-MM-DD"
-    description: str                             # merchant name or free-text label
+    posted_date: str = Field(..., min_length=8, max_length=32)  # ISO date "YYYY-MM-DD"
+    # 500 chars covers even long restaurant names + notes; rejects megabyte-spam.
+    description: str = Field(..., min_length=1, max_length=500)
     amount: float                                # positive number (in stated currency)
     paid_by_member_id: int                       # member who paid
-    category: Optional[str] = None              # auto-detected if omitted
+    category: Optional[str] = Field(default=None, max_length=64)
     participants_json: Optional[dict] = None    # {"type": "all", "member_ids": [...]}
     split_method_json: Optional[dict] = None    # {"type": "equal"} etc.
     # Multi-currency: if currency differs from the group's base_currency, provide exchange_rate

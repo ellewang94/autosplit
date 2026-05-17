@@ -462,3 +462,54 @@ class TestTransactionDelete:
 
         # $100 split 2 ways → Bob owes Alice $50, total shared = $100
         assert settle["total_shared_expenses"] == pytest.approx(100.0, abs=0.01)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Foreign-currency validation — reject silently-zero / missing exchange rates
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestForeignCurrencyValidation:
+    """
+    If a user enters an expense in a foreign currency (e.g. JPY) but forgets
+    to provide an exchange rate — or provides 0 — the backend MUST reject the
+    request with a clear error. Silently storing the foreign amount as if it
+    were the base currency would corrupt settlement math.
+    """
+
+    def test_foreign_currency_with_zero_rate_is_rejected(self, group_with_members):
+        gid = group_with_members["group_id"]
+        resp = client.post(f"/api/groups/{gid}/transactions/manual", json={
+            "posted_date": "2026-01-15",
+            "description": "Tokyo ramen",
+            "amount": 1500,
+            "currency": "JPY",
+            "exchange_rate": 0,
+            "paid_by_member_id": group_with_members["alice_id"],
+        })
+        assert resp.status_code == 400
+        assert "exchange rate" in resp.json()["detail"].lower()
+
+    def test_foreign_currency_with_missing_rate_is_rejected(self, group_with_members):
+        gid = group_with_members["group_id"]
+        resp = client.post(f"/api/groups/{gid}/transactions/manual", json={
+            "posted_date": "2026-01-15",
+            "description": "Paris pastry",
+            "amount": 12,
+            "currency": "EUR",
+            # exchange_rate intentionally omitted
+            "paid_by_member_id": group_with_members["alice_id"],
+        })
+        assert resp.status_code == 400
+        assert "exchange rate" in resp.json()["detail"].lower()
+
+    def test_foreign_currency_with_negative_rate_is_rejected(self, group_with_members):
+        gid = group_with_members["group_id"]
+        resp = client.post(f"/api/groups/{gid}/transactions/manual", json={
+            "posted_date": "2026-01-15",
+            "description": "Negative rate gibberish",
+            "amount": 100,
+            "currency": "CAD",
+            "exchange_rate": -0.75,
+            "paid_by_member_id": group_with_members["alice_id"],
+        })
+        assert resp.status_code == 400

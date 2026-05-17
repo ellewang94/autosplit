@@ -9,11 +9,77 @@ Pattern: validate input → call service → return response schema.
 """
 
 import json
+import logging
+import time
 import uuid as _uuid_module
 import os
 import secrets
 import string
+from collections import defaultdict, deque
+from threading import Lock
 from typing import List, Optional
+
+logger = logging.getLogger(__name__)
+
+# ── Upload size caps ──────────────────────────────────────────────────────────
+# FastAPI's UploadFile reads the entire request body into memory before the
+# handler runs, so a single 1GB "PDF" could OOM the backend. Enforce a sane
+# cap on every upload route. Receipts have their own cap inside the OCR
+# service (8MB) since they're phone snaps, not multi-page documents.
+_MAX_STATEMENT_BYTES = 50 * 1024 * 1024  # 50 MB — generous for the longest CC statements
+_MAX_RECEIPT_BYTES = 8 * 1024 * 1024     # 8 MB — already enforced in receipt_ocr.py
+
+
+async def _read_upload_with_cap(file, max_bytes: int) -> bytes:
+    """
+    Read an UploadFile into memory, but bail out cleanly if it would exceed
+    `max_bytes`. Streams in 1MB chunks so we never accumulate more than the
+    cap + one chunk before raising.
+    """
+    chunks = []
+    total = 0
+    while True:
+        chunk = await file.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(
+                status_code=413,  # 413 Payload Too Large
+                detail=f"File is too large. Maximum size is {max_bytes // (1024 * 1024)} MB.",
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+# ── Lightweight in-memory rate limiter for unauthenticated endpoints ──────────
+# Public share routes have no auth, so they're easy targets for brute-force and
+# view-count spam. This sliding-window limiter caps each share_code at N hits
+# per minute per worker. For multi-worker / multi-replica setups the right
+# answer is Redis, but per-worker is plenty to defeat casual scraping.
+_RATE_LIMIT_PER_MINUTE = 100
+_rate_limit_buckets: dict = defaultdict(deque)
+_rate_limit_lock = Lock()
+
+
+def _check_rate_limit(key: str, per_minute: int = _RATE_LIMIT_PER_MINUTE) -> None:
+    """
+    Raise HTTPException 429 if `key` has exceeded `per_minute` hits in the
+    last 60 seconds. Otherwise record this hit and return.
+    """
+    now = time.monotonic()
+    cutoff = now - 60.0
+    with _rate_limit_lock:
+        bucket = _rate_limit_buckets[key]
+        # Discard timestamps outside the 60-second window.
+        while bucket and bucket[0] < cutoff:
+            bucket.popleft()
+        if len(bucket) >= per_minute:
+            raise HTTPException(
+                status_code=429,
+                detail="Too many requests. Please slow down and try again in a minute.",
+            )
+        bucket.append(now)
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Header, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
@@ -426,7 +492,7 @@ async def parse_receipt_endpoint(
             detail="Receipt must be an image (PNG, JPEG, HEIC).",
         )
 
-    raw = await file.read()
+    raw = await _read_upload_with_cap(file, _MAX_RECEIPT_BYTES)
     if not raw:
         raise HTTPException(status_code=400, detail="Empty file")
 
@@ -457,7 +523,7 @@ async def upload_statement(
     if not file.filename.lower().endswith('.pdf'):
         raise HTTPException(status_code=400, detail="File must be a PDF")
 
-    file_bytes = await file.read()
+    file_bytes = await _read_upload_with_cap(file, _MAX_STATEMENT_BYTES)
 
     try:
         result = import_statement(
@@ -469,6 +535,11 @@ async def upload_statement(
             exchange_rate=exchange_rate,
         )
         return UploadResponse(**result)
+    except ValueError as e:
+        # ValueError is the service's signal for "bad user input" (e.g. missing
+        # exchange rate). Surface it as 400 with the original message so the
+        # UI can show a helpful error instead of generic "parsing failed".
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"PDF parsing failed: {str(e)}")
 
@@ -488,7 +559,7 @@ async def upload_csv_statement(
     if not file.filename.lower().endswith('.csv'):
         raise HTTPException(status_code=400, detail="File must be a CSV")
 
-    file_bytes = await file.read()
+    file_bytes = await _read_upload_with_cap(file, _MAX_STATEMENT_BYTES)
 
     try:
         result = import_csv_statement(
@@ -571,21 +642,26 @@ def add_manual_transaction(group_id: int, body: ManualTransactionCreate, user_id
     if not member:
         raise HTTPException(status_code=400, detail="Payer is not a member of this group.")
 
-    result = create_manual_transaction(
-        group_id=group_id,
-        posted_date=body.posted_date,
-        description=body.description,
-        amount=body.amount,
-        paid_by_member_id=body.paid_by_member_id,
-        db=db,
-        category=body.category,
-        participants_json=body.participants_json,
-        split_method_json=body.split_method_json,
-        # Pass through multi-currency fields (defaults to USD / no conversion if omitted)
-        currency=body.currency,
-        original_amount=body.original_amount,
-        exchange_rate=body.exchange_rate,
-    )
+    try:
+        result = create_manual_transaction(
+            group_id=group_id,
+            posted_date=body.posted_date,
+            description=body.description,
+            amount=body.amount,
+            paid_by_member_id=body.paid_by_member_id,
+            db=db,
+            category=body.category,
+            participants_json=body.participants_json,
+            split_method_json=body.split_method_json,
+            # Pass through multi-currency fields (defaults to USD / no conversion if omitted)
+            currency=body.currency,
+            original_amount=body.original_amount,
+            exchange_rate=body.exchange_rate,
+        )
+    except ValueError as e:
+        # Service layer raises ValueError for invalid user input (e.g. missing
+        # exchange rate on a foreign-currency expense). Convert to HTTP 400.
+        raise HTTPException(status_code=400, detail=str(e))
     return result
 
 
@@ -613,6 +689,14 @@ def list_group_transactions(group_id: int, user_id: str = Depends(get_current_us
     try:
         generate_due_for_group(group_id, db)
     except Exception:
+        # Don't fail the whole request just because recurring catch-up broke —
+        # but DO log loudly so the bug is visible in Sentry/Railway logs.
+        # The user still gets their existing transactions; recurring ones will
+        # be generated on a later page load once the bug is fixed.
+        logger.exception(
+            "Recurring-expense generation failed for group_id=%s — "
+            "returning existing transactions only.", group_id
+        )
         db.rollback()
     stmt_ids = [s.id for s in db.query(Statement).filter_by(group_id=group_id).all()]
     if not stmt_ids:
@@ -1087,20 +1171,31 @@ def create_merchant_rule(
     user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    _require_group(group_id, user_id, db)  # verify ownership before creating
+    group = _require_group(group_id, user_id, db)  # verify ownership before creating
 
-    # Upsert
+    # Normalize the merchant key to lowercase so rules created via the API
+    # match what the auto-import path stores. Without this, "Whole Foods"
+    # entered manually never matches "whole foods" from the parser.
+    # Belt-and-suspenders for the SQLite → Postgres migration too: Postgres
+    # is case-sensitive on string equality, so consistent casing is critical.
+    normalized_key = (body.merchant_key or "").strip().lower()
+    if not normalized_key:
+        raise HTTPException(status_code=400, detail="merchant_key cannot be empty")
+
     rule = db.query(MerchantRule).filter_by(
-        group_id=group_id, merchant_key=body.merchant_key
+        group_id=group_id, merchant_key=normalized_key
     ).first()
     if rule:
         rule.default_category = body.default_category
         rule.default_participants_json = body.default_participants_json
         rule.default_split_method_json = body.default_split_method_json
     else:
+        payload = body.model_dump()
+        payload["merchant_key"] = normalized_key
         rule = MerchantRule(
             group_id=group_id,
-            **body.model_dump(),
+            owner_id=group.owner_id,  # defense-in-depth: snapshot owner on new rules
+            **payload,
         )
         db.add(rule)
     db.commit()
@@ -1448,6 +1543,10 @@ def get_public_share(
     Also increments the view_count so the trip owner can see how many
     people have opened their share link.
     """
+    # Rate-limit per share code so a scraper can't enumerate codes or spam
+    # the view counter. 100/min per code is more than any human will hit.
+    _check_rate_limit(f"share:{share_code}")
+
     # Look up the share
     share = db.query(TripShare).filter_by(share_code=share_code).first()
     if not share:

@@ -15,8 +15,11 @@ Environment variables:
     NTFY_CHANNEL  — the channel name (default: autosplit666)
 """
 
+import logging
 import os
 import httpx
+
+logger = logging.getLogger(__name__)
 
 # The channel name — change via NTFY_CHANNEL env var if you ever rotate it
 NTFY_CHANNEL = os.getenv("NTFY_CHANNEL", "autosplit666")
@@ -66,5 +69,7 @@ def send_push(
             return True
     except Exception as e:
         # Non-critical — log and move on. Don't let push failures break anything.
-        print(f"[notify] Push failed: {e}")
+        # Using logger.warning instead of print so this surfaces in Sentry/Railway
+        # log search rather than getting buried in raw stdout.
+        logger.warning("ntfy push failed: %s", e)
         return False

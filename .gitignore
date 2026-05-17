@@ -23,3 +23,6 @@ frontend/dist/
 # Environment
 .env
 .env.local
+
+# Reddit monitor — seen-posts state is now in the DB, not on disk
+backend/scripts/seen_posts.json

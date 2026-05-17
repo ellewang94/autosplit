@@ -70,8 +70,12 @@ def _ensure_manual_statement_for_payer(group_id: int, paid_by_member_id: int, db
     stmt = db.query(Statement).filter_by(source_hash=virtual_hash).first()
     if stmt:
         return stmt
+    # Snapshot the group owner onto the virtual statement (defense-in-depth).
+    from models.models import Group as _Group  # local import avoids circular deps
+    _group_for_owner = db.query(_Group).filter_by(id=group_id).first()
     stmt = Statement(
         group_id=group_id,
+        owner_id=_group_for_owner.owner_id if _group_for_owner else None,
         source_hash=virtual_hash,
         card_holder_member_id=paid_by_member_id,
         raw_text="Manual expenses",
@@ -132,8 +136,15 @@ def generate_due_for_group(group_id: int, db: Session, today: Optional[date] = N
 
             existing = db.query(Transaction).filter_by(txn_hash=txn_hash).first()
             if not existing:
+                # Race window: two workers could both pass the existence
+                # check and try to insert the same recurring instance. We
+                # wrap the insert+flush in a savepoint so an IntegrityError
+                # (or any DB-level conflict) doesn't poison the outer
+                # transaction. If the insert fails, another worker won —
+                # we treat it as success and move on.
                 txn = Transaction(
                     statement_id=manual_stmt.id,
+                    owner_id=manual_stmt.owner_id,  # snapshot owner from parent
                     posted_date=posted_date_str,
                     description_raw=tpl.name,
                     amount=tpl.amount,
@@ -148,9 +159,17 @@ def generate_due_for_group(group_id: int, db: Session, today: Optional[date] = N
                     txn_hash=txn_hash,
                     status="confirmed",  # recurring expenses are pre-approved by the user
                 )
-                db.add(txn)
-                db.flush()
-                created.append(txn)
+                sp = db.begin_nested()  # savepoint
+                try:
+                    db.add(txn)
+                    db.flush()
+                    sp.commit()
+                    created.append(txn)
+                except Exception:
+                    # Another worker generated this same instance first.
+                    # Roll back just the savepoint (not the whole session)
+                    # and move on — the row exists, we're done.
+                    sp.rollback()
 
             tpl.last_generated_date = posted_date_str
             cursor = next_due

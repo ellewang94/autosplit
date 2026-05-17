@@ -151,13 +151,21 @@ def run_migrations():
                 except Exception:
                     conn.rollback()
 
+        # ── Auto-increment primary key syntax differs by database ────────────
+        # SQLite uses `INTEGER PRIMARY KEY AUTOINCREMENT`; Postgres uses `SERIAL
+        # PRIMARY KEY`. We pick the right one based on the configured driver.
+        # The SQLAlchemy models in models.py handle this for us via
+        # `Column(Integer, primary_key=True, autoincrement=True)`, but the raw
+        # CREATE TABLE statements below need explicit SQL.
+        _AUTOINC_PK = "SERIAL PRIMARY KEY" if _IS_POSTGRES else "INTEGER PRIMARY KEY AUTOINCREMENT"
+
         # Create the recurring_expenses table if it doesn't exist yet.
         # Templates that auto-generate transactions monthly (rent, utilities,
         # subscriptions). Backed by the lazy catch-up generator at read time.
         try:
-            conn.execute(text("""
+            conn.execute(text(f"""
                 CREATE TABLE IF NOT EXISTS recurring_expenses (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id {_AUTOINC_PK},
                     group_id INTEGER NOT NULL REFERENCES groups(id),
                     name VARCHAR NOT NULL,
                     amount FLOAT NOT NULL,
@@ -183,9 +191,9 @@ def run_migrations():
         # We can't use ALTER TABLE for a whole new table, so we use CREATE TABLE IF NOT EXISTS.
         # This is safe to run every startup — the IF NOT EXISTS clause prevents duplicates.
         try:
-            conn.execute(text("""
+            conn.execute(text(f"""
                 CREATE TABLE IF NOT EXISTS trip_shares (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id {_AUTOINC_PK},
                     share_code VARCHAR UNIQUE NOT NULL,
                     group_id INTEGER NOT NULL REFERENCES groups(id),
                     created_by VARCHAR NOT NULL,

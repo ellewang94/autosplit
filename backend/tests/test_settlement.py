@@ -74,13 +74,29 @@ class TestExactSplit:
 # Net balance tests
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def make_transaction(amount, participant_ids, is_personal=False, split_method=None):
+def make_transaction(amount, participant_ids, is_personal=False, split_method=None, statement_id=1):
     """Helper: create a mock transaction object."""
     txn = MagicMock()
     txn.amount = amount
     txn.is_personal = is_personal
     txn.participants_json = {"type": "all", "member_ids": participant_ids}
     txn.split_method_json = split_method or {"type": "equal"}
+    txn.statement_id = statement_id
+    # Tests that don't use items_json should never enter the items path —
+    # set it to None explicitly so MagicMock's auto-attribute doesn't surprise us.
+    txn.items_json = None
+    return txn
+
+
+def make_itemized_transaction(amount, items, statement_id=1):
+    """Helper: create a mock transaction with a per-item breakdown."""
+    txn = MagicMock()
+    txn.amount = amount
+    txn.is_personal = False
+    txn.participants_json = None
+    txn.split_method_json = None
+    txn.items_json = items
+    txn.statement_id = statement_id
     return txn
 
 
@@ -228,3 +244,100 @@ class TestMinimizeTransfers:
         for mid, original_balance in balances.items():
             final = original_balance + settled[mid]
             assert abs(final) < 0.01, f"Member {mid} not fully settled: net {final}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Per-item split tests — mixed-receipt couples scenario
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestPerItemSplits:
+    """
+    When a single receipt contains a mix of "mine", "yours", and "shared"
+    items (typical at Whole Foods, Costco, etc.), the transaction can carry
+    an items_json breakdown. Settlement must allocate each item's amount to
+    its own participants — the transaction-level participants are ignored.
+    """
+
+    def test_three_items_mine_yours_shared(self):
+        """
+        $80 Whole Foods receipt:
+          $20 wine — Alice only
+          $30 protein powder — Bob only
+          $30 groceries — split equally
+        Alice paid the whole thing. After settlement:
+          Alice owes herself $20 + $15 (her half of groceries) = $35
+          Bob owes Alice $30 + $15 = $45
+        Net: Alice +$45, Bob -$45.
+        """
+        alice, bob = 1, 2
+        txn = make_itemized_transaction(80.00, items=[
+            {"name": "Wine",       "amount": 20.00, "member_ids": [alice]},
+            {"name": "Protein",    "amount": 30.00, "member_ids": [bob]},
+            {"name": "Groceries",  "amount": 30.00, "member_ids": [alice, bob]},
+        ])
+        balances = compute_net_balances([txn], payer_member_id=alice, all_member_ids=[alice, bob])
+        assert balances[alice] == pytest.approx(45.0, abs=0.01)
+        assert balances[bob] == pytest.approx(-45.0, abs=0.01)
+        # Conservation of money — sum of all balances is zero.
+        assert abs(sum(balances.values())) < 0.01
+
+    def test_item_with_single_participant(self):
+        """Item with one participant: that person owes the full item amount."""
+        alice, bob = 1, 2
+        txn = make_itemized_transaction(50.00, items=[
+            {"name": "Bob's stuff", "amount": 50.00, "member_ids": [bob]},
+        ])
+        balances = compute_net_balances([txn], payer_member_id=alice, all_member_ids=[alice, bob])
+        assert balances[alice] == pytest.approx(50.0, abs=0.01)   # she paid, she's owed full
+        assert balances[bob] == pytest.approx(-50.0, abs=0.01)    # owes full
+
+    def test_item_with_zero_amount_skipped(self):
+        """Items with non-positive amounts shouldn't crash and shouldn't shift balances."""
+        alice, bob = 1, 2
+        txn = make_itemized_transaction(40.00, items=[
+            {"name": "Real item",  "amount": 40.00, "member_ids": [alice, bob]},
+            {"name": "Bad item",   "amount": 0,     "member_ids": [alice]},      # skipped
+            {"name": "Negative",   "amount": -5,    "member_ids": [bob]},        # skipped
+        ])
+        balances = compute_net_balances([txn], payer_member_id=alice, all_member_ids=[alice, bob])
+        # Only the $40 item matters; equal split between alice + bob.
+        assert balances[alice] == pytest.approx(20.0, abs=0.01)
+        assert balances[bob] == pytest.approx(-20.0, abs=0.01)
+
+    def test_item_with_no_participants_does_not_crash(self):
+        """
+        Items with empty member_ids are rejected at write time by the route
+        validator, so this is a defense-in-depth check: if a malformed item
+        ever reached settlement, it must skip gracefully instead of crashing
+        with a ZeroDivisionError. We only assert the call returns; balance
+        values for this edge case aren't a meaningful contract.
+        """
+        alice, bob = 1, 2
+        txn = make_itemized_transaction(60.00, items=[
+            {"name": "Real item",   "amount": 30.00, "member_ids": [alice, bob]},
+            {"name": "Orphan item", "amount": 30.00, "member_ids": []},
+        ])
+        # Must not raise — the orphan item should be skipped silently.
+        balances = compute_net_balances([txn], payer_member_id=alice, all_member_ids=[alice, bob])
+        # Sanity: the real item's split DID happen (Bob owes something).
+        assert balances[bob] < 0
+
+    def test_items_override_participants(self):
+        """
+        If items_json is set, the txn-level participants_json should be ignored.
+        We construct a txn that LOOKS like it splits equally between three people,
+        but items reassign everything to just one person — items should win.
+        """
+        alice, bob, carol = 1, 2, 3
+        txn = make_itemized_transaction(90.00, items=[
+            {"name": "Alice only", "amount": 90.00, "member_ids": [alice]},
+        ])
+        # Add a tx-level participant list that contradicts the items
+        txn.participants_json = {"type": "all", "member_ids": [alice, bob, carol]}
+        txn.split_method_json = {"type": "equal"}
+
+        balances = compute_net_balances([txn], payer_member_id=alice, all_member_ids=[alice, bob, carol])
+        # Items take precedence — Alice owes herself, no one else owes anything.
+        assert balances[alice] == pytest.approx(0.0, abs=0.01)
+        assert balances.get(bob, 0.0) == pytest.approx(0.0, abs=0.01)
+        assert balances.get(carol, 0.0) == pytest.approx(0.0, abs=0.01)
