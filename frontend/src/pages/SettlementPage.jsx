@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { api } from '../api/client'
@@ -134,15 +134,25 @@ function formatAmount(amount, currency = 'USD') {
 function CopyButton({ text }) {
   const [copied, setCopied] = useState(false)
 
+  // useEffect handles the "copied → reset after 2s" transition. Putting the
+  // timeout here instead of inside copy() means it gets cleaned up when the
+  // component unmounts (e.g. user navigates away mid-toast) — otherwise
+  // React fires "setState on unmounted component" warnings.
+  useEffect(() => {
+    if (!copied) return
+    const id = setTimeout(() => setCopied(false), 2000)
+    return () => clearTimeout(id)
+  }, [copied])
+
   const copy = () => {
     navigator.clipboard.writeText(text)
     setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
   }
 
   return (
     <button
       onClick={copy}
+      aria-label={copied ? 'Copied to clipboard' : 'Copy to clipboard'}
       className={clsx(
         'btn-ghost py-1 px-2 text-xs transition-colors',
         copied && 'text-lime-400'
@@ -251,6 +261,8 @@ function TransferCard({ transfer, index, currency = 'USD', groupId, members = []
         <button
           onClick={togglePaid}
           title={paid ? 'Mark as unpaid' : 'Mark as paid'}
+          aria-label={paid ? 'Mark as unpaid' : 'Mark as paid'}
+          aria-pressed={paid}
           className={clsx(
             'flex-shrink-0 w-7 h-7 rounded-full border-2 flex items-center justify-center transition-all',
             paid
@@ -266,6 +278,8 @@ function TransferCard({ transfer, index, currency = 'USD', groupId, members = []
           className="btn-ghost py-1 px-2 flex-shrink-0"
           onClick={() => setExpanded(!expanded)}
           title="Payment request message"
+          aria-label={expanded ? 'Hide payment message' : 'Show payment message'}
+          aria-expanded={expanded}
         >
           <ChevronDown size={14} className={clsx('transition-transform', expanded && 'rotate-180')} />
         </button>
@@ -399,6 +413,14 @@ function SharePanel({ groupId, effectivePayerId }) {
   const [loading, setLoading] = useState(false)
   const [revoking, setRevoking] = useState(false)
 
+  // Reset the "copied!" indicator on a timer; cleanup prevents setState on
+  // an unmounted component if the user navigates away mid-toast.
+  useEffect(() => {
+    if (!copied) return
+    const id = setTimeout(() => setCopied(false), 2500)
+    return () => clearTimeout(id)
+  }, [copied])
+
   async function handleShare() {
     setLoading(true)
     try {
@@ -432,7 +454,7 @@ function SharePanel({ groupId, effectivePayerId }) {
   function copyLink() {
     navigator.clipboard.writeText(shareUrl)
     setCopied(true)
-    setTimeout(() => setCopied(false), 2500)
+    // The reset timeout lives in the useEffect above, with proper cleanup.
   }
 
   // Helper: open a pre-filled iMessage / WhatsApp / plain SMS with the share link
@@ -865,8 +887,14 @@ export default function SettlementPage() {
               ) : (
                 <div className="space-y-2">
                   {settlement.transfers.map((t, i) => (
+                    // Stable key derived from the transfer's identity (who pays
+                    // whom + amount), NOT the array index. Array indices break
+                    // local state like "mark as paid" when the list reorders —
+                    // React thinks "the second card is the same card" even
+                    // when its content changed, so the paid flag follows the
+                    // wrong transfer.
                     <TransferCard
-                      key={i}
+                      key={`${t.from_member_id}-${t.to_member_id}-${t.amount}`}
                       transfer={t}
                       index={i}
                       currency={currency}
