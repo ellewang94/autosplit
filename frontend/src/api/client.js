@@ -74,7 +74,12 @@ export const api = {
 
   // People you've collaborated with on past trips — surfaced as quick-add
   // chips in the People sheet so you don't retype a name for every new trip.
-  getRecentCollaborators: () => request('/me/recent-collaborators'),
+  // Pass currentGroupId so the trip you're editing is excluded from the
+  // pool (otherwise its own members would show up as past collaborators
+  // of themselves).
+  getRecentCollaborators: (currentGroupId) => request(
+    '/me/recent-collaborators' + (currentGroupId ? `?current_group_id=${currentGroupId}` : '')
+  ),
 
   // Reserve N "(Pending)" placeholder member slots and get the invite link.
   // The UI calls this with the slider value the owner sets in the People sheet.

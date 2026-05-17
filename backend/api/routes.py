@@ -1782,11 +1782,17 @@ def list_recent_collaborators(
     user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
     limit: int = 8,
+    current_group_id: Optional[int] = None,
 ):
     """
     Quick-add chips for the People sheet. Returns up to `limit` people the
-    current user has collaborated with on past trips, ordered by trip count
-    (most-collaborated first). The current user themselves is excluded.
+    current user has collaborated with on PAST trips (excluding the trip
+    they're currently editing), ordered by trip count (most-collaborated first).
+    The current user themselves is excluded.
+
+    Pass `?current_group_id=X` to exclude that group from the source pool —
+    otherwise the trip you're currently adding to would show its own members
+    back at you as "past collaborators," which is confusing.
 
     Source of truth: every Member row in trips this user owns OR is a member
     of, deduplicated by either user_id (if set) or by lowercased name.
@@ -1795,6 +1801,10 @@ def list_recent_collaborators(
     owned_ids = {g.id for g in db.query(Group.id).filter_by(owner_id=user_id).all()}
     joined_ids = {m.group_id for m in db.query(Member.group_id).filter_by(user_id=user_id).all()}
     trip_ids = owned_ids | joined_ids
+    # Exclude the trip currently being edited so its own members don't show
+    # up as "past collaborators" of themselves.
+    if current_group_id is not None:
+        trip_ids.discard(current_group_id)
     if not trip_ids:
         return []
 

@@ -4,7 +4,7 @@ import { api } from '../api/client'
 import { useAuth } from '../contexts/AuthContext'
 import {
   Users, X, Plus, Check, UserCheck, Wallet, Link2, Copy,
-  CheckCircle, MessageCircle, Loader, Hourglass,
+  CheckCircle, MessageCircle, Loader, Hourglass, Clock,
 } from 'lucide-react'
 import clsx from 'clsx'
 
@@ -39,8 +39,9 @@ export default function PeopleSheet({ group, members, isOwner, onClose, onEditHa
   // These are people the owner has collaborated with on prior trips. We fetch
   // even for non-owners so members can suggest names from their own history.
   const { data: recent = [] } = useQuery({
-    queryKey: ['recent-collaborators'],
-    queryFn: () => api.getRecentCollaborators(),
+    // Include groupId in the key so the cache doesn't bleed between trips.
+    queryKey: ['recent-collaborators', groupId],
+    queryFn: () => api.getRecentCollaborators(groupId),
     staleTime: 5 * 60_000,
   })
 
@@ -225,9 +226,24 @@ export default function PeopleSheet({ group, members, isOwner, onClose, onEditHa
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-medium text-ink-100 truncate">{m.name}</div>
                       <div className="flex items-center gap-2 text-[10px] mt-0.5">
-                        {m.has_account && (
-                          <span className="text-green-400 flex items-center gap-0.5">
-                            <UserCheck size={10} /> joined
+                        {/* Joined vs pending — same prominence, opposing colors
+                            so it's instantly readable: green = they've clicked
+                            the invite link and signed in; amber = waiting on them. */}
+                        {m.has_account ? (
+                          <span
+                            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-green-400 bg-green-400/10 border border-green-400/20"
+                            title="This person has clicked the invite link and signed in"
+                          >
+                            <UserCheck size={10} strokeWidth={2.5} />
+                            <span className="font-semibold">Joined</span>
+                          </span>
+                        ) : (
+                          <span
+                            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-amber-400 bg-amber-400/10 border border-amber-400/20"
+                            title="Waiting for them to click the invite link"
+                          >
+                            <Clock size={10} strokeWidth={2.5} />
+                            <span className="font-semibold">Pending invite</span>
                           </span>
                         )}
                         <span
