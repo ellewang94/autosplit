@@ -11,7 +11,6 @@ Strategy:
   - Track seen post IDs so you never get the same post twice
 """
 
-import json
 import os
 import sys
 import time
@@ -29,9 +28,12 @@ from dotenv import load_dotenv
 load_dotenv(BACKEND_ROOT / ".env")
 
 from notify import send_push
+# Database-backed seen-post tracking. The old JSON-file approach got wiped
+# on every Railway deploy, causing the same Reddit posts to push twice.
+from database import SessionLocal
+from models.models import SeenRedditPost
 
 # ── Config ────────────────────────────────────────────────────────────────────
-SEEN_FILE = Path(__file__).parent / "seen_posts.json"
 MAX_POST_AGE_HOURS = 48     # ignore posts older than 2 days
 MIN_SCORE = 0               # minimum upvotes (0 = include all, raise to reduce noise)
 
@@ -111,18 +113,69 @@ SEARCHES = [
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def load_seen() -> set:
-    if SEEN_FILE.exists():
+_LEGACY_SEEN_FILE = Path(__file__).parent / "seen_posts.json"
+
+
+def _seed_from_legacy_json_if_needed() -> None:
+    """
+    One-time migration from the old JSON-on-disk format. If seen_posts.json
+    exists and the DB has no rows yet, copy the IDs over so we don't re-push
+    posts Elle already saw before the migration. Idempotent — running twice
+    just no-ops because the second pass sees the DB rows already exist.
+    """
+    if not _LEGACY_SEEN_FILE.exists():
+        return
+    db = SessionLocal()
+    try:
+        if db.query(SeenRedditPost).first() is not None:
+            return  # DB already has data — no seeding needed
         try:
-            return set(json.loads(SEEN_FILE.read_text()))
+            import json as _json
+            ids = _json.loads(_LEGACY_SEEN_FILE.read_text())
         except Exception:
-            return set()
-    return set()
+            return
+        for post_id in ids:
+            try:
+                db.add(SeenRedditPost(post_id=str(post_id)))
+                db.commit()
+            except Exception:
+                db.rollback()
+    finally:
+        db.close()
 
 
-def save_seen(seen: set) -> None:
-    recent = list(seen)[-2000:]
-    SEEN_FILE.write_text(json.dumps(recent))
+def load_seen() -> set:
+    """Load every Reddit post ID we've already alerted on, from the database."""
+    _seed_from_legacy_json_if_needed()
+    db = SessionLocal()
+    try:
+        return {row.post_id for row in db.query(SeenRedditPost).all()}
+    finally:
+        db.close()
+
+
+def save_seen(new_post_ids: set) -> None:
+    """
+    Persist newly-seen post IDs to the database. Uses INSERT OR IGNORE-style
+    upsert via try/except per row, so a race between two cron runs hitting
+    the same post doesn't crash either one.
+
+    Note: this used to write to seen_posts.json on disk. That worked on Elle's
+    laptop but lost state on every Railway deploy — same posts pushed twice.
+    """
+    if not new_post_ids:
+        return
+    db = SessionLocal()
+    try:
+        for post_id in new_post_ids:
+            try:
+                db.add(SeenRedditPost(post_id=post_id))
+                db.commit()
+            except Exception:
+                # Likely a duplicate from a concurrent run — ignore and continue.
+                db.rollback()
+    finally:
+        db.close()
 
 
 def to_ascii_safe(text: str) -> str:
@@ -208,7 +261,8 @@ def run() -> None:
 
         print(f"{new_count} new")
 
-    save_seen(seen | new_seen)
+    # Persist only the newly-seen post IDs; existing ones are already in the DB.
+    save_seen(new_seen)
 
     if not alerts:
         print("  No new posts found.")

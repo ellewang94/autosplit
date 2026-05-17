@@ -21,18 +21,49 @@ there's literally no secret to leak.
 
 import os
 import json
+import time
 import urllib.request
 from typing import Optional
 from fastapi import Header, HTTPException
 from jose import jwt, JWTError
 from jose import jwk as jose_jwk
 
-# ── JWKS cache ────────────────────────────────────────────────────────────────
-# We fetch the public keys from Supabase once and keep them in memory.
-# Supabase keys rotate infrequently, so this is safe and much faster than
-# fetching on every request. In the unlikely event of a key rotation,
-# restarting the server will refresh the cache.
+# ── JWKS cache (TTL-based, multi-worker safe) ─────────────────────────────────
+# Each FastAPI worker keeps its own in-memory copy of Supabase's public signing
+# keys. Without a TTL, every worker holds its keys forever — meaning when
+# Supabase rotates keys, only the worker that re-fetched gets the new ones,
+# and the rest reject perfectly-valid tokens until restart.
+#
+# A 1-hour TTL makes every worker re-fetch periodically, so key rotation
+# propagates across all replicas within an hour on its own. Lookups for an
+# unknown `kid` ALSO force a refresh, so rotation is picked up within one
+# failed-request roundtrip in practice — the TTL is the safety net.
+#
+# Note: in a high-replica setup, a shared Redis cache would be better
+# (one fetch covers all workers). Until then, the TTL is the right tradeoff
+# between freshness and Supabase API load.
+_JWKS_TTL_SECONDS = 3600
 _jwks_cache: Optional[dict] = None
+_jwks_cache_at: float = 0.0
+
+
+def _fetch_jwks() -> dict:
+    """Fetch the JWKS document from Supabase. Raises if unreachable."""
+    supabase_url = os.getenv("SUPABASE_URL")
+    if not supabase_url:
+        raise HTTPException(
+            status_code=500,
+            detail="SUPABASE_URL is not configured on the server."
+        )
+    jwks_url = f"{supabase_url}/auth/v1/.well-known/jwks.json"
+    try:
+        with urllib.request.urlopen(jwks_url, timeout=5) as resp:
+            return json.loads(resp.read())
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Could not fetch auth keys from Supabase: {e}"
+        )
 
 
 def _get_public_key(kid: str):
@@ -43,33 +74,29 @@ def _get_public_key(kid: str):
     kid = "key ID" — each signing key has an ID so you can look it up.
     It's included in the JWT header so we know which key was used to sign it.
     """
-    global _jwks_cache
+    global _jwks_cache, _jwks_cache_at
 
-    # Lazy-load: fetch from Supabase only once per server boot
-    if _jwks_cache is None:
-        supabase_url = os.getenv("SUPABASE_URL")
-        if not supabase_url:
-            raise HTTPException(
-                status_code=500,
-                detail="SUPABASE_URL is not configured on the server."
-            )
-        jwks_url = f"{supabase_url}/auth/v1/.well-known/jwks.json"
-        try:
-            with urllib.request.urlopen(jwks_url, timeout=5) as resp:
-                _jwks_cache = json.loads(resp.read())
-        except Exception as e:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Could not fetch auth keys from Supabase: {e}"
-            )
+    now = time.time()
+
+    # Refresh if (a) we've never fetched, or (b) the cache is older than TTL.
+    if _jwks_cache is None or (now - _jwks_cache_at) > _JWKS_TTL_SECONDS:
+        _jwks_cache = _fetch_jwks()
+        _jwks_cache_at = now
 
     # Find the key whose kid matches the one in the JWT header
     keys = _jwks_cache.get("keys", [])
     key_data = next((k for k in keys if k.get("kid") == kid), None)
 
+    # Unknown kid — likely a fresh rotation. Force one more refresh in case
+    # the cache is stale, then try again. Prevents users getting locked out
+    # for up to TTL after a rotation.
     if not key_data:
-        # Kid not found — clear cache and raise so the server can retry on next boot
-        _jwks_cache = None
+        _jwks_cache = _fetch_jwks()
+        _jwks_cache_at = now
+        keys = _jwks_cache.get("keys", [])
+        key_data = next((k for k in keys if k.get("kid") == kid), None)
+
+    if not key_data:
         raise HTTPException(status_code=401, detail="Unknown signing key. Please sign in again.")
 
     # Build a usable public key object from the JWKS data

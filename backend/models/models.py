@@ -6,7 +6,7 @@ Each class = one table, each Column = one column in that table.
 The relationships let SQLAlchemy automatically join tables for us.
 """
 
-from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, Text, ForeignKey, JSON, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, Text, ForeignKey, JSON, UniqueConstraint, CheckConstraint
 from sqlalchemy.orm import declarative_base, relationship
 from datetime import datetime, timezone
 
@@ -105,6 +105,11 @@ class Statement(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     group_id = Column(Integer, ForeignKey("groups.id"), nullable=False)
+    # Denormalized owner — copy of Group.owner_id captured at creation.
+    # Defense-in-depth for multi-tenancy: lets queries scope by owner without
+    # joining to groups, and unlocks Postgres Row-Level Security policies.
+    # Nullable so legacy rows (created before this column) keep working.
+    owner_id = Column(String, nullable=True, index=True)
     # Statement date = the closing/due date printed on the statement
     statement_date = Column(String, nullable=True)
     period_start = Column(String, nullable=True)   # e.g. "2026-01-09"
@@ -140,6 +145,9 @@ class Transaction(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     statement_id = Column(Integer, ForeignKey("statements.id"), nullable=False)
+    # Denormalized owner — copy of the parent Group.owner_id captured at
+    # creation. Same defense-in-depth purpose as Statement.owner_id.
+    owner_id = Column(String, nullable=True, index=True)
     posted_date = Column(String, nullable=False)        # "2026-01-15" (ISO format)
     description_raw = Column(String, nullable=False)    # Exactly as it appears on statement
     amount = Column(Float, nullable=False)              # Amount in the group's base currency
@@ -192,6 +200,16 @@ class Transaction(Base):
 
     statement = relationship("Statement", back_populates="transactions")
 
+    # Hard-enforce the status enum at the DB level. Without this, a typo
+    # ("confimed") would silently break settlement filters that key off the
+    # exact string. CheckConstraint works in both SQLite and Postgres.
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('unreviewed', 'confirmed', 'excluded')",
+            name="ck_transactions_status_enum",
+        ),
+    )
+
 
 class MerchantRule(Base):
     """
@@ -209,6 +227,8 @@ class MerchantRule(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     group_id = Column(Integer, ForeignKey("groups.id"), nullable=False)
+    # Denormalized owner — same defense-in-depth pattern as Statement/Transaction.
+    owner_id = Column(String, nullable=True, index=True)
     merchant_key = Column(String, nullable=False)           # normalized merchant name
     default_category = Column(String, nullable=True)
     default_participants_json = Column(JSON, nullable=True)
@@ -316,3 +336,75 @@ class Feedback(Base):
     # Which page they were on — helps us understand context
     page = Column(String, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class Subscription(Base):
+    """
+    Stripe subscription scaffolding.
+
+    Mirrors the bare minimum needed to gate paid features on the app side
+    without re-querying Stripe on every request. The source of truth stays
+    in Stripe; we sync via webhooks (checkout.session.completed,
+    customer.subscription.updated, customer.subscription.deleted).
+
+    Plan strings expected: "trial" (free / first trip only), "pay_per_trip"
+    ($4.99 one-time), "subscription_monthly" ($7.99/mo). Status mirrors
+    Stripe's subscription status: active, trialing, past_due, canceled,
+    incomplete, incomplete_expired.
+    """
+    __tablename__ = "subscriptions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    # Supabase user UUID — the same identifier we use elsewhere for owner_id.
+    user_id = Column(String, nullable=False, index=True)
+    # Stripe customer + subscription IDs let us look the user up either way.
+    stripe_customer_id = Column(String, nullable=True, index=True)
+    stripe_subscription_id = Column(String, unique=True, nullable=True, index=True)
+    # Which paid product the user is on. Free users have no Subscription row.
+    plan = Column(String, nullable=False, default="trial")
+    # Mirror of Stripe's subscription.status so we can check entitlement
+    # without an API call. Updated by the webhook handler.
+    status = Column(String, nullable=False, default="incomplete")
+    # When the current paid period ends; lets us hide paywalls until then.
+    current_period_end = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class BillingEvent(Base):
+    """
+    Audit log of every Stripe webhook we've processed.
+
+    Two purposes:
+      1. Idempotency — Stripe occasionally retries a webhook; we use the
+         `stripe_event_id` unique constraint to skip duplicates.
+      2. Debugging — if a customer says "I paid but the app says I haven't",
+         we can grep this table for their `stripe_customer_id` and see the
+         exact sequence of events Stripe reported.
+    """
+    __tablename__ = "billing_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    stripe_event_id = Column(String, unique=True, nullable=False, index=True)
+    event_type = Column(String, nullable=False)              # "checkout.session.completed" etc.
+    stripe_customer_id = Column(String, nullable=True, index=True)
+    user_id = Column(String, nullable=True, index=True)      # may be null until we resolve it
+    # Raw event payload — JSON-encoded — for forensic debugging.
+    payload_json = Column(JSON, nullable=True)
+    received_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class SeenRedditPost(Base):
+    """
+    Tracks which Reddit posts the growth monitor has already alerted on.
+
+    Used to be a JSON file on disk, but that gets wiped on every Railway
+    deploy. Persisting to the database means the monitor never re-pushes
+    the same Reddit post twice, no matter how many times the cron job runs.
+    """
+    __tablename__ = "seen_reddit_posts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    # Reddit's own post ID (e.g. "1abc234"). Unique so we can upsert safely.
+    post_id = Column(String, unique=True, nullable=False, index=True)
+    seen_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

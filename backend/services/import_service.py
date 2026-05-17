@@ -27,6 +27,36 @@ from adapters.csv_parser import parse_bank_csv
 from domain.categories import categorize, suggest_participants, normalize_merchant_key
 
 
+def _validate_exchange_rate(
+    statement_currency: Optional[str],
+    base_currency: str,
+    exchange_rate: Optional[float],
+) -> None:
+    """
+    Guard against silently corrupting settlement math when the user uploads
+    a foreign-currency expense without a valid exchange rate.
+
+    If the currencies match, no rate is needed.
+    If they differ, the rate must be a positive number — otherwise we'd treat
+    a ¥5,000 amount as $5,000 and the settlement math would be catastrophically
+    wrong without anyone noticing.
+
+    Raises ValueError with a user-facing message; routes translate that to a
+    400 Bad Request so the user sees a clear error instead of corrupted data.
+    """
+    # Same currency (or unspecified) — no conversion needed at all.
+    if not statement_currency or statement_currency == base_currency:
+        return
+
+    # Different currency — exchange_rate is mandatory and must be > 0.
+    if exchange_rate is None or exchange_rate <= 0:
+        raise ValueError(
+            f"Exchange rate is required when uploading a {statement_currency} "
+            f"expense into a {base_currency} group. Got: {exchange_rate!r}. "
+            "Please enter a positive rate (e.g. 0.0067 for 1 JPY = 0.0067 USD)."
+        )
+
+
 def _detect_pdf_bank(file_bytes: bytes) -> str:
     """
     Peek at the first page of a PDF to figure out which bank issued it.
@@ -85,8 +115,12 @@ def _save_parsed_statement(
         }
 
     # ── Save Statement record ─────────────────────────────────────────────────
+    # We fetch group early to snapshot owner_id onto the Statement (defense-in-depth).
+    _group_for_owner = db.query(Group).filter_by(id=group_id).first()
     stmt = Statement(
         group_id=group_id,
+        # Snapshot the group owner so future RLS / direct queries can scope by user.
+        owner_id=_group_for_owner.owner_id if _group_for_owner else None,
         statement_date=parsed.statement_date,
         period_start=parsed.period_start,
         period_end=parsed.period_end,
@@ -121,11 +155,15 @@ def _save_parsed_statement(
     # to convert every transaction to the base currency so settlement math works.
     group = db.query(Group).filter_by(id=group_id).first()
     base_currency = group.base_currency if group else "USD"
+
+    # Reject foreign-currency uploads without a valid exchange rate before we
+    # save anything. Otherwise we'd silently treat foreign amounts as base
+    # currency and the settlement totals would be wrong without warning.
+    _validate_exchange_rate(statement_currency, base_currency, exchange_rate)
+
     needs_conversion = (
         statement_currency
         and statement_currency != base_currency
-        and exchange_rate
-        and exchange_rate > 0
     )
 
     # ── Save each transaction ─────────────────────────────────────────────────
@@ -184,6 +222,7 @@ def _save_parsed_statement(
 
         txn = Transaction(
             statement_id=stmt.id,
+            owner_id=stmt.owner_id,      # snapshot owner from parent statement
             posted_date=parsed_txn.posted_date,
             description_raw=parsed_txn.description_raw,
             amount=txn_amount,           # always in base currency after conversion
@@ -277,7 +316,21 @@ def _save_parsed_statement(
                 txn.status = "excluded"
                 excluded_by_date_count += 1
 
-    db.commit()
+    # ── Atomic commit ─────────────────────────────────────────────────────────
+    # All the db.add() and db.flush() calls above happen inside a single
+    # database transaction. If commit() raises (constraint violation, lost
+    # connection, etc.), we MUST rollback explicitly — otherwise the session
+    # is left in a broken state where subsequent queries on the same session
+    # would also fail. After rollback we raise a clean error the route can
+    # turn into a 422 the user sees.
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise RuntimeError(
+            f"Failed to save imported statement: {e}. "
+            "No transactions were saved — please try again."
+        )
 
     msg = f"Imported {saved_count} transactions. {needs_review_count} need review."
     if surfaced_pre_trip_count:
@@ -408,8 +461,11 @@ def create_manual_transaction(
 
     stmt = db.query(Statement).filter_by(source_hash=virtual_hash).first()
     if not stmt:
+        # Snapshot the group owner so the virtual statement carries owner_id.
+        _group_for_owner = db.query(Group).filter_by(id=group_id).first()
         stmt = Statement(
             group_id=group_id,
+            owner_id=_group_for_owner.owner_id if _group_for_owner else None,
             source_hash=virtual_hash,
             card_holder_member_id=paid_by_member_id,
             raw_text="Manual expenses",
@@ -430,7 +486,12 @@ def create_manual_transaction(
     group = db.query(Group).filter_by(id=group_id).first()
     base_currency = group.base_currency if group else "USD"
 
-    if currency and currency != base_currency and exchange_rate:
+    # Reject foreign-currency entries without a valid exchange rate before
+    # we save anything. Otherwise a ¥5,000 expense with rate=0 would be
+    # silently stored as $5,000 — catastrophically wrong settlement totals.
+    _validate_exchange_rate(currency, base_currency, exchange_rate)
+
+    if currency and currency != base_currency:
         # Store the foreign-currency amount before conversion so we can show it in the UI
         original_amount = amount
         # Convert to base currency for settlement calculations
@@ -479,6 +540,7 @@ def create_manual_transaction(
     # ── Save the transaction ──────────────────────────────────────────────────
     txn = Transaction(
         statement_id=stmt.id,
+        owner_id=stmt.owner_id,          # snapshot owner from parent virtual statement
         posted_date=posted_date,
         description_raw=description,
         amount=amount,                   # always in base currency (converted above if needed)
@@ -497,7 +559,14 @@ def create_manual_transaction(
         original_amount=original_amount,  # null if same currency as group base
     )
     db.add(txn)
-    db.commit()
+    # Atomic commit — rollback explicitly on failure so the session is reusable.
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise RuntimeError(
+            f"Failed to save manual expense: {e}. Please try again."
+        )
 
     return {
         "transaction_id": txn.id,
@@ -535,8 +604,11 @@ def save_merchant_rule(
         rule.default_participants_json = txn.participants_json
         rule.default_split_method_json = txn.split_method_json
     else:
+        # Snapshot the group owner so merchant rules carry owner_id for RLS.
+        _group_for_owner = db.query(Group).filter_by(id=group_id).first()
         rule = MerchantRule(
             group_id=group_id,
+            owner_id=_group_for_owner.owner_id if _group_for_owner else None,
             merchant_key=merchant_key,
             default_category=txn.category,
             default_participants_json=txn.participants_json,

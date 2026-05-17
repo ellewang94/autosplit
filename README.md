@@ -70,6 +70,26 @@ bash start.sh
 cd backend && python -m pytest tests/ -v
 ```
 
+## Database migrations (Alembic)
+
+Schema changes go through Alembic — versioned scripts under `backend/alembic/versions/`.
+The legacy "ALTER TABLE at startup" path in `database.py` is kept for backward compatibility
+on existing local databases, but new schema work should land as an Alembic migration.
+
+Common commands (from `backend/`):
+
+```bash
+# Create a new migration after editing models.py
+alembic revision --autogenerate -m "add ____ table"
+
+# Apply pending migrations to the database pointed to by DATABASE_URL
+alembic upgrade head
+
+# Mark the current DB state as up-to-date without running migrations.
+# Use this once on an existing database that was created before Alembic was set up.
+alembic stamp head
+```
+
 ## Bank support
 
 | Bank | PDF | CSV |
