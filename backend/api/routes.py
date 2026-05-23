@@ -252,6 +252,15 @@ def delete_group(
     db: Session = Depends(get_db),
 ):
     group = _require_group(group_id, user_id, db)
+
+    # The Group ORM relationships only cascade members, statements, and
+    # merchant_rules. Two other tables reference the group but are NOT cascaded:
+    # recurring_expenses and trip_shares. On PostgreSQL (which enforces foreign
+    # keys) leaving them behind makes this delete fail with a 500, because the
+    # group row is still referenced. So we remove them explicitly first.
+    db.query(RecurringExpense).filter(RecurringExpense.group_id == group_id).delete(synchronize_session=False)
+    db.query(TripShare).filter(TripShare.group_id == group_id).delete(synchronize_session=False)
+
     db.delete(group)
     db.commit()
     return {"ok": True}

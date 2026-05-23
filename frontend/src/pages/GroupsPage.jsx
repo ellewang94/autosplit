@@ -140,9 +140,30 @@ function GroupCard({ group }) {
               </button>
             ) : (
               <div className="flex items-center gap-1">
-                <span className="text-xs text-ink-400">Delete?</span>
-                <button className="btn-danger py-0.5 px-2 text-xs" onClick={() => deleteGroup.mutate()}>Yes</button>
-                <button className="btn-ghost py-0.5 px-2 text-xs" onClick={() => setConfirmDelete(false)}>No</button>
+                {/* Feedback matters here: previously a failed delete changed
+                    nothing on screen, so it looked "stuck". Now we show the
+                    error, and disable + relabel the button while it's working. */}
+                {deleteGroup.isError ? (
+                  <span className="text-xs text-red-400" title={deleteGroup.error?.message}>
+                    Couldn't delete — try again
+                  </span>
+                ) : (
+                  <span className="text-xs text-ink-400">Delete?</span>
+                )}
+                <button
+                  className="btn-danger py-0.5 px-2 text-xs disabled:opacity-50"
+                  disabled={deleteGroup.isPending}
+                  onClick={() => deleteGroup.mutate()}
+                >
+                  {deleteGroup.isPending ? 'Deleting…' : 'Yes'}
+                </button>
+                <button
+                  className="btn-ghost py-0.5 px-2 text-xs"
+                  disabled={deleteGroup.isPending}
+                  onClick={() => { setConfirmDelete(false); deleteGroup.reset() }}
+                >
+                  No
+                </button>
               </div>
             )}
           </div>
