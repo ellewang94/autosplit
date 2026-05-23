@@ -22,7 +22,7 @@ import {
 // Currency symbols — same map used throughout the app
 const CURRENCY_SYMBOLS = {
   USD: '$', AUD: 'A$', NZD: 'NZ$', JPY: '¥',
-  GBP: '£', EUR: '€', CAD: 'C$', SGD: 'S$', HKD: 'HK$', THB: '฿',
+  GBP: '£', EUR: '€', CAD: 'C$', SGD: 'S$', HKD: 'HK$', THB: '฿', MXN: 'Mex$',
 }
 
 function formatAmount(amount, currency = 'USD') {

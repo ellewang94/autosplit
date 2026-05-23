@@ -84,7 +84,7 @@ function ImportFeedback({ groupId }) {
 }
 
 // ── Supported currencies ──────────────────────────────────────────────────────
-const CURRENCIES = ['USD', 'AUD', 'NZD', 'JPY', 'GBP', 'EUR', 'CAD', 'SGD', 'HKD', 'THB']
+const CURRENCIES = ['USD', 'AUD', 'NZD', 'JPY', 'GBP', 'EUR', 'CAD', 'SGD', 'HKD', 'THB', 'MXN']
 
 // ── Bank instructions ─────────────────────────────────────────────────────────
 const PDF_BANKS = [

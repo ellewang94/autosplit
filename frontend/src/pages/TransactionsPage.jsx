@@ -18,12 +18,12 @@ const CATEGORIES = [
 ]
 
 // All supported currencies for expense entry and group setup
-const CURRENCIES = ['USD', 'AUD', 'NZD', 'JPY', 'GBP', 'EUR', 'CAD', 'SGD', 'HKD', 'THB']
+const CURRENCIES = ['USD', 'AUD', 'NZD', 'JPY', 'GBP', 'EUR', 'CAD', 'SGD', 'HKD', 'THB', 'MXN']
 
 // Currency symbol map — used to format amounts like "¥5,000" or "£42.00"
 const CURRENCY_SYMBOLS = {
   USD: '$', AUD: 'A$', NZD: 'NZ$', JPY: '¥',
-  GBP: '£', EUR: '€', CAD: 'C$', SGD: 'S$', HKD: 'HK$', THB: '฿',
+  GBP: '£', EUR: '€', CAD: 'C$', SGD: 'S$', HKD: 'HK$', THB: '฿', MXN: 'Mex$',
 }
 
 /**

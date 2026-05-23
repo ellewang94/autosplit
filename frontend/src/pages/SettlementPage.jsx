@@ -118,7 +118,7 @@ function fmtPeriod(stmt) {
 // Currency symbol map — same as TransactionsPage
 const CURRENCY_SYMBOLS = {
   USD: '$', AUD: 'A$', NZD: 'NZ$', JPY: '¥',
-  GBP: '£', EUR: '€', CAD: 'C$', SGD: 'S$', HKD: 'HK$', THB: '฿',
+  GBP: '£', EUR: '€', CAD: 'C$', SGD: 'S$', HKD: 'HK$', THB: '฿', MXN: 'Mex$',
 }
 
 function formatAmount(amount, currency = 'USD') {
