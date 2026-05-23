@@ -421,6 +421,51 @@ The technical piece: the `SharePage` is completely public (no auth required). It
 
 **Cloud migration is mostly config, not code** — if you built with clean architecture. The settlement math, categorization, and parsing are identical between the SQLite version and the PostgreSQL cloud version. The only change was the database URL and the addition of auth middleware. Good architecture pays dividends.
 
+## Session 3: The Mexico Trip Shakedown
+
+The best way to find out if a product works is to bet a real trip on it. The night before flying to Mexico with friends, we used the upcoming trip as a forcing function: pretend you're the friend who just got a payment request, and walk every step. Three things fell out — one cosmetic, one dangerous, one missing entirely.
+
+### The case of the disappearing peso (a silent 17× overcharge)
+
+AutoSplit had **three separate lists of supported currencies** living in three different files — one for creating a trip, one for the add-expense form, one for uploading a statement. A comment in the code even claimed they were "the same." They were not. Trip-creation knew about the Mexican Peso; the expense forms did not.
+
+Here's why that's scary rather than annoying. When you snap a photo of a 340-peso taco dinner, the AI reads `amount: 340, currency: MXN` correctly. The form then runs `if (CURRENCIES.includes('MXN')) setCurrency('MXN')` — but MXN wasn't in *that* list, so the line quietly did nothing and left the currency on the trip's default (US dollars). Result: a ~$20 dinner logged as **$340**, no error, no warning. The numbers just look plausible and are wrong by 17×. On a trip whose entire purpose is splitting fairly, a silent wrong number is worse than a loud crash.
+
+The fix was tiny (add `'MXN'` to two lists and the `Mex$` symbol to three money formatters) but the lesson is large: **duplicated source-of-truth is a time bomb.** Three lists that "should match" will eventually drift, and the drift hides until someone in Tulum gets overcharged. One day this should be a single shared constant.
+
+### The delete button that froze (and the two-part bug behind it)
+
+You clicked "Delete" on a test trip, confirmed "Yes," and the screen just... sat there. This turned out to be **two bugs wearing one trench coat**, which is why it's a good debugging story.
+
+We resisted the urge to guess. We reproduced it live in a real browser and watched the network tab: `DELETE /api/groups/8 → 500`. Hard evidence first, theories second. Then the code told the rest:
+
+- **Back-end:** deleting a trip leaned entirely on SQLAlchemy's "cascade" — the feature where deleting a parent auto-deletes its children. But the cascade was only wired up for *three* of the five tables that point at a trip. Two tables — recurring expenses and **share links** — were left out. In production (PostgreSQL, which strictly enforces these relationships) the database refused to delete a trip that still had a share link hanging off it, and threw a 500. (Locally we'd never have caught this: the test database is SQLite, which by default ignores those relationship rules entirely. Same code, different database, different behavior. A classic.)
+- **Front-end:** the delete button had no "loading" and no "error" state. So when the back-end said 500, the screen showed... exactly nothing. The click looked ignored. *That* was the "stuck" feeling.
+
+We fixed both. The back-end now explicitly clears those two child tables before deleting the trip, guarded by a new automated test (`test_delete_group.py`) that asserts a deleted trip leaves zero orphaned rows anywhere. The button now says "Deleting…" while it works and "Couldn't delete — try again" if it fails. Then we proved the fix in production the honest way: created a throwaway trip, gave it a share link to recreate the exact failure, deleted it, and watched it return a clean `200 {"ok": true}` and vanish — without ever touching your real Mexico trip.
+
+**Lesson:** every button that calls the network needs three faces — *idle*, *working*, *failed*. A button with only one face will eventually look broken even when the only problem is a slow wifi connection in a Mexican café.
+
+### The feature that wasn't plugged in
+
+The shakedown's biggest find wasn't a bug in the code — it was a bug in the *deployment*. The "Snap a receipt" AI feature works locally but is **switched off in production**, because the live back-end on Railway is missing its `GEMINI_API_KEY`. The code is fine; the key was never added to the cloud server's settings. So in production the receipt scanner politely refuses every photo.
+
+This is the sneakiest class of problem: it only exists in the gap *between* environments. The unit tests pass, the code review looks clean, the local demo is flawless — and the feature is dead the moment it's deployed, because a config value lives in your laptop's shell (or nowhere) instead of the cloud. **A feature isn't "done" until its configuration exists in the same place the code runs.**
+
+We couldn't fix this one autonomously (the key isn't in the repo, and the Railway login had expired), so we did the next best thing: made the front-end fail *gracefully*. Instead of showing friends a developer message about environment variables, the receipt scanner now says "Receipt scanning isn't available right now — just type the expense in below." The trip stays usable on the two expense paths that don't need AI: typing it in, and uploading a statement.
+
+**To turn the receipt scanner back on** (≈3 minutes): grab a free key from Google AI Studio (aistudio.google.com → "Get API key"), then in the Railway dashboard open the **backend** service → **Variables** → add `GEMINI_API_KEY` = your key → Railway redeploys itself. Done.
+
+### Lessons for Future You
+
+**A trip is the best test plan.** Walking a real scenario end-to-end ("I'm in Mexico, I paid in pesos, my friend needs to see what they owe") surfaced a currency bug, a delete bug, and a missing key — none of which a checklist of features would have caught.
+
+**One source of truth, always.** The peso bug existed only because the same fact (the currency list) was written down in three places. Anything copy-pasted will drift.
+
+**Tests on SQLite ≠ behavior on PostgreSQL.** Our test database is forgiving in ways production is not. When a delete or a relationship "works in tests but breaks live," suspect the database doing the enforcing.
+
+**Config is part of the product.** The most invisible failures live in the space between "works on my machine" and "deployed." Keep a checklist of every secret/key the app needs, and verify each one exists in the cloud — not just locally.
+
 ---
 
 *Built with FastAPI · PostgreSQL · React · Tailwind · Railway · Supabase · Vercel.*
