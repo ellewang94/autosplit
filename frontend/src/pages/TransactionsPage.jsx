@@ -781,7 +781,16 @@ function AddExpenseModal({ groupId, members: allMembers, group, onClose, onSaved
       )
       setOcrResult({ confidence: data.confidence, notes: data.notes })
     } catch (err) {
-      setOcrError(err.message || 'Could not read this receipt.')
+      // Receipt scanning needs a server-side AI key. If it isn't set up, the
+      // backend returns a developer-flavoured "not configured" message — not
+      // something a friend on a trip should see. Translate it into a clear,
+      // actionable fallback (just type the expense in by hand).
+      const raw = err.message || ''
+      setOcrError(
+        /not configured/i.test(raw)
+          ? "Receipt scanning isn't available right now — just close this and type the expense in below."
+          : (raw || 'Could not read this receipt.')
+      )
     } finally {
       setOcrLoading(false)
       // Reset the input so picking the same file twice still triggers onChange
