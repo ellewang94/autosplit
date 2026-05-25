@@ -44,9 +44,11 @@ logger = logging.getLogger(__name__)
 GEMINI_API_KEY_ENV = "GEMINI_API_KEY"
 ANTHROPIC_API_KEY_ENV = "ANTHROPIC_API_KEY"
 
-# Gemini 2.0 Flash: vision-capable, free tier ~1500 RPD. The "001" suffix
-# pins to the stable variant; remove if you want auto-rolling latest.
-GEMINI_MODEL = "gemini-2.0-flash-001"
+# Gemini 2.5 Flash: current vision-capable flash model. We previously pinned
+# gemini-2.0-flash-001, but Google retired that version for new API keys
+# (404 "no longer available to new users"). 2.5-flash is fast, cheap, and
+# available to new keys — ideal for reading receipts.
+GEMINI_MODEL = "gemini-2.5-flash"
 # Anthropic fallback. Haiku 4.5 — vision, cheap, plenty smart for receipts.
 ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
 
