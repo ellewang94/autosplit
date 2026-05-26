@@ -7,6 +7,7 @@
 import { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
+import OpenInBrowserBanner from '../components/OpenInBrowserBanner'
 import { supabase } from '../lib/supabase'
 import { Zap, Mail, Lock, AlertCircle, CheckCircle, ArrowRight, RefreshCw, ChevronDown } from 'lucide-react'
 
@@ -156,6 +157,9 @@ export default function SignupPage() {
         <div className="bg-ink-900 border border-ink-700 rounded-2xl shadow-2xl overflow-hidden">
 
           <div className="px-6 pt-6 pb-5 space-y-4">
+
+            {/* In-app browsers block Google sign-in — offer a way to the real browser. */}
+            <OpenInBrowserBanner />
 
             {error && (
               <div className="flex items-start gap-2.5 px-3 py-2.5 rounded-lg bg-red-500/8 border border-red-500/20">

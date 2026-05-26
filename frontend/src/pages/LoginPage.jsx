@@ -7,6 +7,7 @@
 import { useState } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
+import OpenInBrowserBanner from '../components/OpenInBrowserBanner'
 import { Zap, Mail, Lock, AlertCircle, ArrowRight, KeyRound } from 'lucide-react'
 
 // Google's official "G" logo as an inline SVG — no extra dependency needed
@@ -87,6 +88,9 @@ export default function LoginPage() {
         <div className="bg-ink-900 border border-ink-700 rounded-2xl shadow-2xl overflow-hidden">
 
           <div className="px-6 pt-6 pb-5 space-y-4">
+
+            {/* In-app browsers block Google sign-in — offer a way to the real browser. */}
+            <OpenInBrowserBanner />
 
             {/* Error banner */}
             {error && (

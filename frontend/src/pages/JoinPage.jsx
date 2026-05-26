@@ -17,6 +17,7 @@ import { useEffect, useState } from 'react'
 import { useParams, useNavigate, useLocation, Link } from 'react-router-dom'
 import { api } from '../api/client'
 import { useAuth } from '../contexts/AuthContext'
+import OpenInBrowserBanner from '../components/OpenInBrowserBanner'
 import { Zap, Users, Calendar, ArrowRight, CheckCircle, AlertCircle, Loader, UserPlus, UserCheck } from 'lucide-react'
 
 function formatDateRange(start, end) {
@@ -188,6 +189,8 @@ export default function JoinPage() {
         {!user ? (
           <div className="bg-ink-900 border border-ink-700 rounded-2xl overflow-hidden shadow-xl">
             <div className="px-6 pt-6 pb-5">
+              {/* In-app browsers block Google sign-in — offer a way to the real browser. */}
+              <OpenInBrowserBanner />
               <p className="text-sm text-ink-300 mb-3 leading-relaxed">
                 Sign in to join this trip and contribute your own expenses.
               </p>
